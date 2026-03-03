@@ -1,0 +1,937 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Generador de Planilla — Hans Christian Andersen</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #242836;
+    --border: #2e3346;
+    --text: #e8eaf0;
+    --text-dim: #8b90a5;
+    --accent: #4f8cff;
+    --accent-glow: rgba(79, 140, 255, 0.15);
+    --green: #34d399;
+    --green-dim: rgba(52, 211, 153, 0.12);
+    --orange: #fb923c;
+    --orange-dim: rgba(251, 146, 60, 0.12);
+    --red: #f87171;
+    --red-dim: rgba(248, 113, 113, 0.12);
+    --radius: 12px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  .grain {
+    position: fixed; inset: 0; pointer-events: none; z-index: 9999;
+    opacity: 0.03;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  }
+
+  header {
+    padding: 2rem 2rem 1.5rem;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(79,140,255,0.04) 0%, transparent 100%);
+  }
+  header h1 {
+    font-family: 'Fraunces', serif;
+    font-size: 1.6rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    background: linear-gradient(135deg, var(--accent) 0%, #a78bfa 100%);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  header p { color: var(--text-dim); font-size: 0.85rem; margin-top: 0.3rem; }
+
+  .container { max-width: 1200px; margin: 0 auto; padding: 1.5rem 2rem 3rem; }
+
+  /* Steps */
+  .steps {
+    display: flex; gap: 0.5rem; margin-bottom: 2rem;
+    border-bottom: 1px solid var(--border); padding-bottom: 1rem;
+  }
+  .step-indicator {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.5rem 1rem; border-radius: 99px;
+    font-size: 0.82rem; font-weight: 500;
+    background: transparent; color: var(--text-dim);
+    transition: all 0.3s;
+  }
+  .step-indicator.active { background: var(--accent-glow); color: var(--accent); }
+  .step-indicator.done { color: var(--green); }
+  .step-num {
+    width: 22px; height: 22px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.72rem; font-weight: 700;
+    border: 1.5px solid currentColor;
+  }
+  .step-indicator.done .step-num { background: var(--green); color: var(--bg); border-color: var(--green); }
+  .step-indicator.active .step-num { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+
+  .step-connector { color: var(--text-dim); display: flex; align-items: center; font-size: 0.7rem; }
+
+  /* Cards */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1.5rem;
+    margin-bottom: 1.2rem;
+    animation: fadeUp 0.4s ease;
+  }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+
+  .card-title {
+    font-family: 'Fraunces', serif;
+    font-size: 1.1rem; font-weight: 600; margin-bottom: 0.8rem;
+    display: flex; align-items: center; gap: 0.5rem;
+  }
+  .card-title .icon { font-size: 1.2rem; }
+
+  /* Upload zone */
+  .upload-zone {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 2rem;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s;
+    position: relative;
+  }
+  .upload-zone:hover, .upload-zone.dragover {
+    border-color: var(--accent);
+    background: var(--accent-glow);
+  }
+  .upload-zone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+  .upload-zone .icon-big { font-size: 2.5rem; margin-bottom: 0.5rem; }
+  .upload-zone .label { font-weight: 600; font-size: 0.95rem; }
+  .upload-zone .sublabel { color: var(--text-dim); font-size: 0.8rem; margin-top: 0.3rem; }
+
+  /* Form inputs */
+  .form-row {
+    display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem;
+    align-items: flex-end;
+  }
+  .form-group { flex: 1; min-width: 200px; }
+  .form-group label {
+    display: block; font-size: 0.78rem; font-weight: 500;
+    color: var(--text-dim); margin-bottom: 0.35rem;
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .form-group input, .form-group select {
+    width: 100%; padding: 0.6rem 0.8rem;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; color: var(--text); font-family: inherit;
+    font-size: 0.9rem; transition: border-color 0.2s;
+  }
+  .form-group input:focus, .form-group select:focus {
+    outline: none; border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+  }
+  .form-group select option { background: var(--surface2); }
+
+  /* Buttons */
+  .btn {
+    display: inline-flex; align-items: center; gap: 0.4rem;
+    padding: 0.6rem 1.2rem; border-radius: 8px;
+    font-family: inherit; font-size: 0.85rem; font-weight: 600;
+    cursor: pointer; border: none; transition: all 0.2s;
+  }
+  .btn-primary { background: var(--accent); color: #fff; }
+  .btn-primary:hover { background: #3d7be8; transform: translateY(-1px); }
+  .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+  .btn-success { background: var(--green); color: var(--bg); }
+  .btn-success:hover { background: #2ec48d; }
+  .btn-outline {
+    background: transparent; color: var(--text-dim);
+    border: 1px solid var(--border);
+  }
+  .btn-outline:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-sm { padding: 0.35rem 0.7rem; font-size: 0.78rem; }
+
+  /* Table */
+  .table-wrapper {
+    overflow-x: auto; border-radius: var(--radius);
+    border: 1px solid var(--border);
+  }
+  table {
+    width: 100%; border-collapse: collapse;
+    font-size: 0.82rem;
+  }
+  thead { background: var(--surface2); }
+  th {
+    padding: 0.65rem 0.8rem; text-align: left;
+    font-weight: 600; color: var(--text-dim);
+    font-size: 0.72rem; text-transform: uppercase;
+    letter-spacing: 0.06em; white-space: nowrap;
+    border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; background: var(--surface2); z-index: 2;
+  }
+  td {
+    padding: 0.55rem 0.8rem;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  tr:hover td { background: rgba(79,140,255,0.04); }
+
+  .badge {
+    display: inline-flex; padding: 0.15rem 0.55rem;
+    border-radius: 99px; font-size: 0.72rem; font-weight: 600;
+  }
+  .badge-student { background: var(--accent-glow); color: var(--accent); }
+  .badge-teacher { background: var(--orange-dim); color: var(--orange); }
+  .badge-beca { background: var(--green-dim); color: var(--green); }
+
+  /* Search bar */
+  .search-bar {
+    position: relative; margin-bottom: 1rem;
+  }
+  .search-bar input {
+    width: 100%; padding: 0.7rem 0.8rem 0.7rem 2.5rem;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; color: var(--text); font-family: inherit;
+    font-size: 0.9rem;
+  }
+  .search-bar input:focus {
+    outline: none; border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+  }
+  .search-icon {
+    position: absolute; left: 0.8rem; top: 50%; transform: translateY(-50%);
+    color: var(--text-dim); font-size: 0.9rem;
+  }
+
+  /* Stats */
+  .stats-row { display: flex; gap: 1rem; margin-bottom: 1.2rem; flex-wrap: wrap; }
+  .stat-card {
+    flex: 1; min-width: 140px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 1rem;
+  }
+  .stat-value {
+    font-family: 'Fraunces', serif;
+    font-size: 1.5rem; font-weight: 700;
+  }
+  .stat-label { font-size: 0.75rem; color: var(--text-dim); margin-top: 0.2rem; }
+
+  /* Discount modal */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; z-index: 100;
+    background: rgba(0,0,0,0.65); backdrop-filter: blur(4px);
+    align-items: center; justify-content: center;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 1.8rem;
+    width: 90%; max-width: 480px;
+    animation: fadeUp 0.3s ease;
+  }
+  .modal h3 {
+    font-family: 'Fraunces', serif;
+    font-size: 1.1rem; margin-bottom: 1rem;
+  }
+  .modal .close-btn {
+    float: right; background: none; border: none;
+    color: var(--text-dim); cursor: pointer; font-size: 1.2rem;
+  }
+
+  .radio-group { display: flex; gap: 0.5rem; margin-bottom: 1rem; }
+  .radio-option {
+    flex: 1; padding: 0.6rem; border: 1px solid var(--border);
+    border-radius: 8px; text-align: center; cursor: pointer;
+    font-size: 0.82rem; font-weight: 500; transition: all 0.2s;
+  }
+  .radio-option.selected {
+    border-color: var(--accent); background: var(--accent-glow); color: var(--accent);
+  }
+
+  .hidden { display: none !important; }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 0.3rem; margin-bottom: 1rem; }
+  .tab {
+    padding: 0.5rem 1rem; border-radius: 8px 8px 0 0;
+    background: transparent; color: var(--text-dim);
+    border: 1px solid transparent; border-bottom: none;
+    cursor: pointer; font-family: inherit; font-weight: 500;
+    font-size: 0.82rem; transition: all 0.2s;
+  }
+  .tab.active { background: var(--surface); color: var(--accent); border-color: var(--border); }
+
+  .file-info {
+    display: flex; align-items: center; gap: 0.6rem;
+    padding: 0.6rem 1rem; background: var(--green-dim);
+    border-radius: 8px; color: var(--green); font-size: 0.85rem;
+    margin-top: 0.8rem;
+  }
+
+  .action-bar {
+    display: flex; gap: 0.8rem; align-items: center;
+    flex-wrap: wrap; margin-bottom: 1rem;
+  }
+
+  .count-badge {
+    font-size: 0.78rem; color: var(--text-dim);
+    padding: 0.3rem 0.8rem; background: var(--surface2);
+    border-radius: 99px;
+  }
+
+  /* Responsive */
+  @media (max-width: 768px) {
+    .container { padding: 1rem; }
+    header { padding: 1.2rem 1rem; }
+    .steps { flex-wrap: wrap; }
+    .stats-row { flex-direction: column; }
+  }
+
+  .inline-input {
+    width: 90px; padding: 0.25rem 0.4rem;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 6px; color: var(--text); font-family: inherit;
+    font-size: 0.8rem; text-align: right;
+  }
+  .inline-input:focus {
+    outline: none; border-color: var(--accent);
+  }
+
+  .checkbox-cell {
+    display: flex; align-items: center; justify-content: center;
+  }
+  .checkbox-cell input[type="checkbox"] {
+    width: 16px; height: 16px; accent-color: var(--accent);
+    cursor: pointer;
+  }
+
+  .editable-cell { cursor: pointer; }
+  .editable-cell:hover { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<div class="grain"></div>
+
+<header>
+  <h1>📋 Generador de Planilla HCA</h1>
+  <p>Carga datos de alumnos y docentes para generar la planilla de anualidades</p>
+</header>
+
+<div class="container">
+  <!-- Steps -->
+  <div class="steps" id="steps">
+    <div class="step-indicator active" id="step1-ind">
+      <span class="step-num">1</span> Cargar archivos
+    </div>
+    <span class="step-connector">→</span>
+    <div class="step-indicator" id="step2-ind">
+      <span class="step-num">2</span> Configurar anualidad
+    </div>
+    <span class="step-connector">→</span>
+    <div class="step-indicator" id="step3-ind">
+      <span class="step-num">3</span> Revisar y descargar
+    </div>
+  </div>
+
+  <!-- Step 1: File Upload -->
+  <div id="step1">
+    <div class="card">
+      <div class="card-title"><span class="icon">🎓</span> Planilla de Alumnos (Primaria o Secundaria)</div>
+      <div class="upload-zone" id="dropzone-students">
+        <input type="file" accept=".xlsx,.xls" id="file-students">
+        <div class="icon-big">📄</div>
+        <div class="label">Arrastrá o hacé clic para cargar</div>
+        <div class="sublabel">Planilla_Primaria.xlsx o Planilla_Secundaria.xlsx</div>
+      </div>
+      <div class="file-info hidden" id="info-students"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="icon">👩‍🏫</span> Datos de Personal (opcional)</div>
+      <div class="upload-zone" id="dropzone-staff">
+        <input type="file" accept=".xlsx,.xls" id="file-staff">
+        <div class="icon-big">📄</div>
+        <div class="label">Arrastrá o hacé clic para cargar</div>
+        <div class="sublabel">ExpDatosPersonal.xlsx</div>
+      </div>
+      <div class="file-info hidden" id="info-staff"></div>
+    </div>
+
+    <button class="btn btn-primary" id="btn-next1" disabled>Continuar →</button>
+  </div>
+
+  <!-- Step 2: Configure -->
+  <div id="step2" class="hidden">
+    <div class="card">
+      <div class="card-title"><span class="icon">💰</span> Anualidad base</div>
+      <p style="color:var(--text-dim);font-size:0.85rem;margin-bottom:1rem;">
+        Ingresá el valor de anualidad por defecto en pesos uruguayos (matrícula + mensualidades, sin extras).
+        Luego podrás ajustar individualmente por alumno.
+      </p>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Anualidad base ($U)</label>
+          <input type="number" id="anualidad-base" placeholder="Ej: 120000" min="0">
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;gap:0.8rem;">
+      <button class="btn btn-outline" id="btn-back2">← Volver</button>
+      <button class="btn btn-primary" id="btn-next2" disabled>Continuar →</button>
+    </div>
+  </div>
+
+  <!-- Step 3: Review -->
+  <div id="step3" class="hidden">
+    <div class="stats-row" id="stats-row"></div>
+
+    <div class="card" style="padding:1rem;">
+      <div class="action-bar">
+        <div class="search-bar" style="flex:1;margin-bottom:0;">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="search-input" placeholder="Buscar por nombre o cédula...">
+        </div>
+        <select id="filter-type" style="padding:0.5rem 0.8rem;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:inherit;font-size:0.82rem;">
+          <option value="all">Todos</option>
+          <option value="ESTUDIANTE">Estudiantes</option>
+          <option value="DOCENTE">Docentes</option>
+        </select>
+        <select id="filter-ciclo" style="padding:0.5rem 0.8rem;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:inherit;font-size:0.82rem;">
+          <option value="all">Todos los ciclos</option>
+        </select>
+        <span class="count-badge" id="count-badge">0 registros</span>
+      </div>
+
+      <div class="table-wrapper" style="max-height:55vh;overflow-y:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Nº CI</th>
+              <th>Fecha Nac.</th>
+              <th>Primer Nombre</th>
+              <th>Primer Apellido</th>
+              <th>Ciclo Educativo</th>
+              <th>Grado</th>
+              <th>Relación</th>
+              <th>Anualidad ($U)</th>
+              <th>Beca Total</th>
+              <th>Descuento</th>
+            </tr>
+          </thead>
+          <tbody id="table-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:0.8rem;margin-top:1rem;">
+      <button class="btn btn-outline" id="btn-back3">← Volver</button>
+      <button class="btn btn-success" id="btn-download">⬇ Descargar Planilla .xls</button>
+    </div>
+  </div>
+</div>
+
+<!-- Discount Modal -->
+<div class="modal-overlay" id="discount-modal">
+  <div class="modal">
+    <button class="close-btn" id="modal-close">✕</button>
+    <h3 id="modal-title">Configurar descuento</h3>
+    <p style="color:var(--text-dim);font-size:0.82rem;margin-bottom:1rem;" id="modal-subtitle"></p>
+
+    <div class="radio-group" id="discount-type">
+      <div class="radio-option selected" data-val="amount">Monto fijo ($U)</div>
+      <div class="radio-option" data-val="percent">Porcentaje (%)</div>
+    </div>
+
+    <div class="form-group" style="margin-bottom:1rem;">
+      <label id="discount-label">Monto que paga en la anualidad ($U)</label>
+      <input type="number" id="discount-value" min="0" placeholder="0">
+    </div>
+
+    <div style="display:flex;gap:0.5rem;">
+      <button class="btn btn-primary" id="modal-apply">Aplicar</button>
+      <button class="btn btn-outline" id="modal-cancel">Cancelar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ===== App State =====
+let allRecords = [];
+let anualidadBase = 0;
+let currentEditIdx = null;
+let studentFileType = null; // 'primaria' or 'secundaria'
+let studentFileLoaded = false;
+let staffFileLoaded = false;
+
+// ===== Course to Grade/Ciclo mapping =====
+function parseCurso(curso) {
+  if (!curso) return { grado: '', ciclo: '' };
+  curso = curso.trim();
+
+  // Extract the number at the beginning
+  const numMatch = curso.match(/^(\d+)/);
+  if (!numMatch) return { grado: '', ciclo: '' };
+  const num = parseInt(numMatch[1]);
+
+  // Determine ciclo and grado
+  if (curso.includes('EBI')) {
+    if (num >= 1 && num <= 6) {
+      return { grado: String(num), ciclo: 'PRIMARIA' };
+    } else if (num >= 7 && num <= 9) {
+      return { grado: String(num), ciclo: 'EDUCACIÓN MEDIA BÁSICA' };
+    }
+  }
+  if (curso.includes('EMS')) {
+    // Educación Media Superior - use 4TO CICLO
+    // 1-EMS = 1, 2XX-EMS = 2, 3XX-EMS = 3
+    return { grado: String(num), ciclo: '4TO CICLO' };
+  }
+
+  return { grado: String(num), ciclo: '' };
+}
+
+// Determine if file is primaria or secundaria based on cursos
+function detectFileType(cursos) {
+  const hasPrimaria = cursos.some(c => {
+    const n = parseInt(c);
+    return n >= 1 && n <= 6 && c.includes('EBI');
+  });
+  const hasSecundaria = cursos.some(c => {
+    const n = parseInt(c);
+    return (n >= 7 && n <= 9 && c.includes('EBI')) || c.includes('EMS');
+  });
+  if (hasPrimaria && !hasSecundaria) return 'primaria';
+  if (hasSecundaria && !hasPrimaria) return 'secundaria';
+  if (hasSecundaria) return 'secundaria';
+  return 'primaria';
+}
+
+// ===== Parse Student File =====
+function parseStudentFile(wb) {
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  const records = [];
+  const cursos = new Set();
+
+  // Data starts at row 4 (0-indexed: 3)
+  for (let r = 3; r <= range.e.r; r++) {
+    const getVal = (c) => {
+      const cell = ws[XLSX.utils.encode_cell({r, c: c-1})];
+      return cell ? String(cell.v || '').trim() : '';
+    };
+
+    const curso = getVal(1);
+    if (!curso) continue;
+    cursos.add(curso);
+
+    const doc = getVal(7).replace(/\D/g, '');
+    if (!doc) continue;
+
+    const primerNombre = getVal(13).trim();
+    const primerApellido = getVal(11).trim();
+    const fecNac = getVal(15);
+
+    const { grado, ciclo } = parseCurso(curso);
+
+    records.push({
+      ci: doc,
+      fechaNac: fecNac,
+      primerNombre: primerNombre.toUpperCase(),
+      primerApellido: primerApellido.toUpperCase(),
+      ciclo: ciclo,
+      grado: grado,
+      relacion: 'ESTUDIANTE',
+      anualidad: 0,
+      becaTotal: 'NO',
+      descuento: null, // null = no discount set
+      cursoOriginal: curso
+    });
+  }
+
+  studentFileType = detectFileType([...cursos]);
+  return records;
+}
+
+// ===== Parse Staff File =====
+function parseStaffFile(wb) {
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  const records = [];
+
+  // Docente-eligible cargos
+  const docenteKeywords = ['maestr', 'profesor', 'director', 'subdirector'];
+
+  for (let r = 4; r <= range.e.r; r++) {
+    const getVal = (c) => {
+      const cell = ws[XLSX.utils.encode_cell({r, c: c-1})];
+      return cell ? String(cell.v || '').trim() : '';
+    };
+
+    const cargo = getVal(74);
+    if (!cargo) continue;
+
+    // Check if docente-eligible
+    const isDocente = docenteKeywords.some(k => cargo.toLowerCase().includes(k));
+    if (!isDocente) continue;
+
+    const doc = getVal(2).replace(/\D/g, '');
+    if (!doc) continue;
+
+    const primerNombre = getVal(3).trim();
+    const primerApellido = getVal(5).trim();
+    const fecNac = getVal(10);
+
+    // Determine ciclo based on cargo
+    let ciclo = '';
+    if (cargo.toLowerCase().includes('inicial')) {
+      ciclo = 'INICIAL';
+    } else if (cargo.toLowerCase().includes('primaria') || cargo.toLowerCase().includes('maestra referente') || cargo.toLowerCase().includes('maestra especializada')) {
+      ciclo = 'PRIMARIA';
+    } else if (cargo.toLowerCase().includes('liceo') || cargo.toLowerCase().includes('profesor')) {
+      ciclo = 'EDUCACIÓN MEDIA BÁSICA';
+    }
+    // Directors
+    if (cargo.toLowerCase().includes('director colegio')) ciclo = 'PRIMARIA';
+    if (cargo.toLowerCase().includes('director liceo')) ciclo = 'EDUCACIÓN MEDIA BÁSICA';
+
+    // If still empty and has multiple roles, pick first relevant one
+    if (!ciclo) {
+      if (cargo.toLowerCase().includes('maestr')) ciclo = 'PRIMARIA';
+      else ciclo = 'EDUCACIÓN MEDIA BÁSICA';
+    }
+
+    records.push({
+      ci: doc,
+      fechaNac: fecNac,
+      primerNombre: primerNombre.toUpperCase(),
+      primerApellido: primerApellido.toUpperCase(),
+      ciclo: ciclo,
+      grado: 'MULTIGRADO',
+      relacion: 'DOCENTE',
+      anualidad: 'N/A',
+      becaTotal: 'N/A',
+      descuento: null,
+      cargo: cargo
+    });
+  }
+
+  return records;
+}
+
+// ===== File loading =====
+function readFile(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target.result);
+        const wb = XLSX.read(data, { type: 'array' });
+        resolve(wb);
+      } catch(err) { reject(err); }
+    };
+    reader.onerror = reject;
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+document.getElementById('file-students').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    const wb = await readFile(file);
+    const records = parseStudentFile(wb);
+    // Remove old students, keep docentes
+    allRecords = allRecords.filter(r => r.relacion === 'DOCENTE');
+    allRecords = [...records, ...allRecords];
+    studentFileLoaded = true;
+    document.getElementById('info-students').classList.remove('hidden');
+    document.getElementById('info-students').textContent =
+      `✓ ${file.name} — ${records.length} alumnos cargados (${studentFileType === 'primaria' ? 'Primaria' : 'Secundaria'})`;
+    updateNextBtn();
+  } catch(err) {
+    alert('Error al leer el archivo: ' + err.message);
+  }
+});
+
+document.getElementById('file-staff').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    const wb = await readFile(file);
+    const records = parseStaffFile(wb);
+    // Remove old docentes, keep students
+    allRecords = allRecords.filter(r => r.relacion === 'ESTUDIANTE');
+    allRecords = [...allRecords, ...records];
+    staffFileLoaded = true;
+    document.getElementById('info-staff').classList.remove('hidden');
+    document.getElementById('info-staff').textContent =
+      `✓ ${file.name} — ${records.length} docentes cargados`;
+    updateNextBtn();
+  } catch(err) {
+    alert('Error al leer el archivo: ' + err.message);
+  }
+});
+
+function updateNextBtn() {
+  document.getElementById('btn-next1').disabled = !studentFileLoaded;
+}
+
+// ===== Drag & drop =====
+['dropzone-students', 'dropzone-staff'].forEach(id => {
+  const zone = document.getElementById(id);
+  zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('dragover'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+  zone.addEventListener('drop', (e) => {
+    e.preventDefault(); zone.classList.remove('dragover');
+    const input = zone.querySelector('input');
+    input.files = e.dataTransfer.files;
+    input.dispatchEvent(new Event('change'));
+  });
+});
+
+// ===== Navigation =====
+function showStep(n) {
+  ['step1','step2','step3'].forEach((id, i) => {
+    document.getElementById(id).classList.toggle('hidden', i !== n-1);
+    const ind = document.getElementById(`step${i+1}-ind`);
+    ind.classList.remove('active', 'done');
+    if (i < n-1) ind.classList.add('done');
+    if (i === n-1) ind.classList.add('active');
+  });
+}
+
+document.getElementById('btn-next1').addEventListener('click', () => showStep(2));
+document.getElementById('btn-back2').addEventListener('click', () => showStep(1));
+document.getElementById('btn-next2').addEventListener('click', () => {
+  anualidadBase = parseFloat(document.getElementById('anualidad-base').value) || 0;
+  // Apply anualidad base to all students that don't have custom discount
+  allRecords.forEach(r => {
+    if (r.relacion === 'ESTUDIANTE') {
+      if (r.descuento === null) {
+        r.anualidad = anualidadBase;
+        r.becaTotal = anualidadBase === 0 ? 'SI' : 'NO';
+      }
+    }
+  });
+  renderStep3();
+  showStep(3);
+});
+document.getElementById('btn-back3').addEventListener('click', () => showStep(2));
+
+document.getElementById('anualidad-base').addEventListener('input', (e) => {
+  document.getElementById('btn-next2').disabled = !e.target.value;
+});
+
+// ===== Step 3: Render table =====
+function renderStep3() {
+  // Populate ciclo filter
+  const ciclos = [...new Set(allRecords.map(r => r.ciclo).filter(Boolean))];
+  const filterCiclo = document.getElementById('filter-ciclo');
+  filterCiclo.innerHTML = '<option value="all">Todos los ciclos</option>';
+  ciclos.sort().forEach(c => {
+    filterCiclo.innerHTML += `<option value="${c}">${c}</option>`;
+  });
+
+  // Stats
+  const students = allRecords.filter(r => r.relacion === 'ESTUDIANTE');
+  const docentes = allRecords.filter(r => r.relacion === 'DOCENTE');
+  const becados = students.filter(r => r.becaTotal === 'SI');
+
+  document.getElementById('stats-row').innerHTML = `
+    <div class="stat-card">
+      <div class="stat-value" style="color:var(--accent)">${allRecords.length}</div>
+      <div class="stat-label">Total registros</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" style="color:var(--text)">${students.length}</div>
+      <div class="stat-label">Estudiantes</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" style="color:var(--orange)">${docentes.length}</div>
+      <div class="stat-label">Docentes</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" style="color:var(--green)">${becados.length}</div>
+      <div class="stat-label">Beca total</div>
+    </div>
+  `;
+
+  renderTable();
+}
+
+function getFilteredRecords() {
+  const search = document.getElementById('search-input').value.toLowerCase().trim();
+  const typeFilter = document.getElementById('filter-type').value;
+  const cicloFilter = document.getElementById('filter-ciclo').value;
+
+  return allRecords.filter((r, i) => {
+    r._idx = i;
+    if (typeFilter !== 'all' && r.relacion !== typeFilter) return false;
+    if (cicloFilter !== 'all' && r.ciclo !== cicloFilter) return false;
+    if (search) {
+      const haystack = `${r.ci} ${r.primerNombre} ${r.primerApellido}`.toLowerCase();
+      if (!haystack.includes(search)) return false;
+    }
+    return true;
+  });
+}
+
+function renderTable() {
+  const filtered = getFilteredRecords();
+  const tbody = document.getElementById('table-body');
+
+  document.getElementById('count-badge').textContent = `${filtered.length} registros`;
+
+  tbody.innerHTML = filtered.map((r, vi) => {
+    const isDocente = r.relacion === 'DOCENTE';
+    const anualidadDisplay = isDocente ? 'N/A' : (typeof r.anualidad === 'number' ? r.anualidad.toLocaleString('es-UY') : r.anualidad);
+    const becaDisplay = r.becaTotal;
+    const discountInfo = r.descuento !== null && !isDocente
+      ? (r.descuento.type === 'percent'
+          ? `${r.descuento.value}%`
+          : `$${r.descuento.value.toLocaleString('es-UY')}`)
+      : '';
+
+    return `<tr>
+      <td style="color:var(--text-dim)">${vi+1}</td>
+      <td style="font-weight:600">${r.ci}</td>
+      <td>${r.fechaNac || ''}</td>
+      <td>${r.primerNombre}</td>
+      <td>${r.primerApellido}</td>
+      <td>${r.ciclo}</td>
+      <td>${r.grado}</td>
+      <td><span class="badge ${isDocente ? 'badge-teacher' : 'badge-student'}">${r.relacion}</span></td>
+      <td style="text-align:right;font-weight:600;${r.becaTotal === 'SI' ? 'color:var(--green)' : ''}">${anualidadDisplay}</td>
+      <td>${becaDisplay === 'SI' ? '<span class="badge badge-beca">SI</span>' : becaDisplay}</td>
+      <td>${isDocente ? '' : `<button class="btn btn-sm btn-outline" onclick="openDiscount(${r._idx})">${discountInfo || '⚙ Ajustar'}</button>`}</td>
+    </tr>`;
+  }).join('');
+}
+
+document.getElementById('search-input').addEventListener('input', renderTable);
+document.getElementById('filter-type').addEventListener('change', renderTable);
+document.getElementById('filter-ciclo').addEventListener('change', renderTable);
+
+// ===== Discount Modal =====
+function openDiscount(idx) {
+  currentEditIdx = idx;
+  const r = allRecords[idx];
+  document.getElementById('modal-title').textContent = `${r.primerNombre} ${r.primerApellido}`;
+  document.getElementById('modal-subtitle').textContent = `CI: ${r.ci} — Anualidad base: $${anualidadBase.toLocaleString('es-UY')}`;
+
+  // Reset
+  selectDiscountType('amount');
+  document.getElementById('discount-value').value = r.descuento ? r.descuento.value : '';
+  document.getElementById('discount-modal').classList.add('show');
+}
+
+function selectDiscountType(type) {
+  document.querySelectorAll('#discount-type .radio-option').forEach(el => {
+    el.classList.toggle('selected', el.dataset.val === type);
+  });
+  document.getElementById('discount-label').textContent =
+    type === 'amount' ? 'Monto que paga en la anualidad ($U)' : 'Porcentaje de descuento (%)';
+  document.getElementById('discount-value').placeholder =
+    type === 'amount' ? '0' : '0-100';
+  document.getElementById('discount-value').max = type === 'percent' ? 100 : '';
+}
+
+document.querySelectorAll('#discount-type .radio-option').forEach(el => {
+  el.addEventListener('click', () => selectDiscountType(el.dataset.val));
+});
+
+document.getElementById('modal-close').addEventListener('click', closeModal);
+document.getElementById('modal-cancel').addEventListener('click', closeModal);
+
+function closeModal() {
+  document.getElementById('discount-modal').classList.remove('show');
+  currentEditIdx = null;
+}
+
+document.getElementById('modal-apply').addEventListener('click', () => {
+  if (currentEditIdx === null) return;
+  const r = allRecords[currentEditIdx];
+  const type = document.querySelector('#discount-type .radio-option.selected').dataset.val;
+  const val = parseFloat(document.getElementById('discount-value').value) || 0;
+
+  if (type === 'amount') {
+    r.anualidad = val;
+    r.becaTotal = val === 0 ? 'SI' : 'NO';
+    r.descuento = { type: 'amount', value: val };
+  } else {
+    // Percentage discount
+    const discounted = Math.round(anualidadBase * (1 - val / 100));
+    r.anualidad = discounted;
+    r.becaTotal = discounted === 0 ? 'SI' : 'NO';
+    r.descuento = { type: 'percent', value: val };
+  }
+
+  closeModal();
+  renderStep3();
+});
+
+// Close modal on overlay click
+document.getElementById('discount-modal').addEventListener('click', (e) => {
+  if (e.target === document.getElementById('discount-modal')) closeModal();
+});
+
+// ===== Download =====
+document.getElementById('btn-download').addEventListener('click', () => {
+  // Build data in template format
+  const headers = [
+    'Nº CI', 'FECHA NACIMIENTO', 'PRIMER NOMBRE', 'PRIMER APELLIDO',
+    'CICLO EDUCATIVO', 'GRADO', 'RELACIÓN CON EL CENTRO EDUCATIVO',
+    'ANUALIDAD ($U)', 'CON BECA TOTAL'
+  ];
+
+  const data = [headers];
+
+  // Deduplicate by CI (keep first occurrence)
+  const seen = new Set();
+  allRecords.forEach(r => {
+    if (seen.has(r.ci)) return;
+    seen.add(r.ci);
+
+    const isDocente = r.relacion === 'DOCENTE';
+    data.push([
+      r.ci,
+      r.fechaNac || '',
+      r.primerNombre,
+      r.primerApellido,
+      r.ciclo,
+      r.grado,
+      r.relacion,
+      isDocente ? 'N/A' : (typeof r.anualidad === 'number' ? r.anualidad : r.anualidad),
+      r.becaTotal
+    ]);
+  });
+
+  const ws = XLSX.utils.aoa_to_sheet(data);
+
+  // Set column widths
+  ws['!cols'] = [
+    { wch: 12 }, { wch: 14 }, { wch: 18 }, { wch: 18 },
+    { wch: 24 }, { wch: 12 }, { wch: 32 }, { wch: 16 }, { wch: 14 }
+  ];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'template_planilla');
+  XLSX.writeFile(wb, 'planilla_anualidades.xls', { bookType: 'xls' });
+});
+</script>
+
+</body>
+</html>
