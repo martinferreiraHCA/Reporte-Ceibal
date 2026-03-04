@@ -316,8 +316,92 @@
     cursor: pointer;
   }
 
-  .editable-cell { cursor: pointer; }
-  .editable-cell:hover { color: var(--accent); }
+  .editable-cell {
+    cursor: pointer;
+    position: relative;
+  }
+  .editable-cell:hover {
+    color: var(--accent);
+    background: var(--accent-glow);
+  }
+  .editable-cell::after {
+    content: '✎';
+    font-size: 0.65rem;
+    margin-left: 0.3rem;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  .editable-cell:hover::after { opacity: 0.7; }
+
+  .edit-input {
+    width: 100%; padding: 0.2rem 0.4rem;
+    background: var(--bg); border: 2px solid var(--accent);
+    border-radius: 4px; color: var(--text); font-family: inherit;
+    font-size: 0.82rem;
+  }
+  .edit-input:focus { outline: none; }
+
+  /* Checkbox filter panel */
+  .filter-panel {
+    display: flex; gap: 1.5rem; flex-wrap: wrap;
+    padding: 0.8rem 1rem;
+    margin-bottom: 0.8rem;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  .filter-group {
+    display: flex; flex-direction: column; gap: 0.3rem;
+  }
+  .filter-group-title {
+    font-size: 0.72rem; font-weight: 600; color: var(--text-dim);
+    text-transform: uppercase; letter-spacing: 0.05em;
+    margin-bottom: 0.2rem;
+  }
+  .filter-checks {
+    display: flex; flex-wrap: wrap; gap: 0.4rem;
+  }
+  .filter-check {
+    display: flex; align-items: center; gap: 0.35rem;
+    padding: 0.25rem 0.6rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.78rem;
+    transition: all 0.2s;
+    user-select: none;
+  }
+  .filter-check:hover { border-color: var(--accent); }
+  .filter-check input[type="checkbox"] {
+    width: 14px; height: 14px; accent-color: var(--accent);
+    cursor: pointer;
+  }
+  .filter-check.unchecked {
+    opacity: 0.45;
+    text-decoration: line-through;
+  }
+
+  .row-disabled td {
+    opacity: 0.3;
+    text-decoration: line-through;
+  }
+  .row-disabled td:first-child { opacity: 1; text-decoration: none; }
+
+  .toggle-filters-btn {
+    padding: 0.4rem 0.8rem;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-dim);
+    font-family: inherit;
+    font-size: 0.78rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .toggle-filters-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .toggle-filters-btn.active { border-color: var(--accent); color: var(--accent); background: var(--accent-glow); }
 </style>
 </head>
 <body>
@@ -408,16 +492,27 @@
           <option value="ESTUDIANTE">Estudiantes</option>
           <option value="DOCENTE">Docentes</option>
         </select>
-        <select id="filter-ciclo" style="padding:0.5rem 0.8rem;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:inherit;font-size:0.82rem;">
-          <option value="all">Todos los ciclos</option>
-        </select>
+        <button class="toggle-filters-btn" id="btn-toggle-filters">☰ Filtros por casilla</button>
         <span class="count-badge" id="count-badge">0 registros</span>
+      </div>
+
+      <!-- Checkbox filter panel -->
+      <div class="filter-panel hidden" id="filter-panel">
+        <div class="filter-group">
+          <div class="filter-group-title">Ciclo Educativo</div>
+          <div class="filter-checks" id="filter-ciclo-checks"></div>
+        </div>
+        <div class="filter-group">
+          <div class="filter-group-title">Grado</div>
+          <div class="filter-checks" id="filter-grado-checks"></div>
+        </div>
       </div>
 
       <div class="table-wrapper" style="max-height:55vh;overflow-y:auto;">
         <table>
           <thead>
             <tr>
+              <th><div class="checkbox-cell"><input type="checkbox" id="select-all" checked title="Activar/desactivar todos"></div></th>
               <th>#</th>
               <th>Nº CI</th>
               <th>Fecha Nac.</th>
@@ -475,6 +570,10 @@ let currentEditIdx = null;
 let studentFileType = null; // 'primaria' or 'secundaria'
 let studentFileLoaded = false;
 let staffFileLoaded = false;
+let disabledRecords = new Set(); // indices of disabled records
+let activeCiclos = new Set();    // checked ciclos
+let activeGrados = new Set();    // checked grados
+let filtersVisible = false;
 
 // ===== Date cleaning utility =====
 // Handles: blank placeholders like '  /  /    ', 2-digit years, and normalizes to dd/mm/aaaa
@@ -765,23 +864,46 @@ document.getElementById('anualidad-base').addEventListener('input', (e) => {
 
 // ===== Step 3: Render table =====
 function renderStep3() {
-  // Populate ciclo filter
-  const ciclos = [...new Set(allRecords.map(r => r.ciclo).filter(Boolean))];
-  const filterCiclo = document.getElementById('filter-ciclo');
-  filterCiclo.innerHTML = '<option value="all">Todos los ciclos</option>';
-  ciclos.sort().forEach(c => {
-    filterCiclo.innerHTML += `<option value="${c}">${c}</option>`;
+  // Populate checkbox filters
+  const ciclos = [...new Set(allRecords.map(r => r.ciclo).filter(Boolean))].sort();
+  const grados = [...new Set(allRecords.map(r => r.grado).filter(Boolean))].sort((a, b) => {
+    const na = parseInt(a), nb = parseInt(b);
+    if (!isNaN(na) && !isNaN(nb)) return na - nb;
+    return a.localeCompare(b);
   });
 
-  // Stats
-  const students = allRecords.filter(r => r.relacion === 'ESTUDIANTE');
-  const docentes = allRecords.filter(r => r.relacion === 'DOCENTE');
+  // Initialize active sets if empty (first load)
+  if (activeCiclos.size === 0) ciclos.forEach(c => activeCiclos.add(c));
+  if (activeGrados.size === 0) grados.forEach(g => activeGrados.add(g));
+
+  // Render ciclo checkboxes
+  document.getElementById('filter-ciclo-checks').innerHTML = ciclos.map(c => {
+    const checked = activeCiclos.has(c);
+    return `<label class="filter-check ${checked ? '' : 'unchecked'}">
+      <input type="checkbox" ${checked ? 'checked' : ''} data-ciclo="${c}" onchange="toggleCiclo(this)">
+      ${c}
+    </label>`;
+  }).join('');
+
+  // Render grado checkboxes
+  document.getElementById('filter-grado-checks').innerHTML = grados.map(g => {
+    const checked = activeGrados.has(g);
+    return `<label class="filter-check ${checked ? '' : 'unchecked'}">
+      <input type="checkbox" ${checked ? 'checked' : ''} data-grado="${g}" onchange="toggleGrado(this)">
+      ${g}
+    </label>`;
+  }).join('');
+
+  // Stats - only count enabled records
+  const enabledRecords = allRecords.filter((r, i) => !disabledRecords.has(i));
+  const students = enabledRecords.filter(r => r.relacion === 'ESTUDIANTE');
+  const docentes = enabledRecords.filter(r => r.relacion === 'DOCENTE');
   const becados = students.filter(r => r.becaTotal === 'SI');
 
   document.getElementById('stats-row').innerHTML = `
     <div class="stat-card">
-      <div class="stat-value" style="color:var(--accent)">${allRecords.length}</div>
-      <div class="stat-label">Total registros</div>
+      <div class="stat-value" style="color:var(--accent)">${enabledRecords.length}</div>
+      <div class="stat-label">Total activos</div>
     </div>
     <div class="stat-card">
       <div class="stat-value" style="color:var(--text)">${students.length}</div>
@@ -800,15 +922,47 @@ function renderStep3() {
   renderTable();
 }
 
+function toggleCiclo(cb) {
+  const ciclo = cb.dataset.ciclo;
+  if (cb.checked) {
+    activeCiclos.add(ciclo);
+    cb.parentElement.classList.remove('unchecked');
+  } else {
+    activeCiclos.delete(ciclo);
+    cb.parentElement.classList.add('unchecked');
+  }
+  renderTable();
+}
+
+function toggleGrado(cb) {
+  const grado = cb.dataset.grado;
+  if (cb.checked) {
+    activeGrados.add(grado);
+    cb.parentElement.classList.remove('unchecked');
+  } else {
+    activeGrados.delete(grado);
+    cb.parentElement.classList.add('unchecked');
+  }
+  renderTable();
+}
+
+// Toggle filter panel visibility
+document.getElementById('btn-toggle-filters').addEventListener('click', () => {
+  filtersVisible = !filtersVisible;
+  document.getElementById('filter-panel').classList.toggle('hidden', !filtersVisible);
+  document.getElementById('btn-toggle-filters').classList.toggle('active', filtersVisible);
+});
+
 function getFilteredRecords() {
   const search = document.getElementById('search-input').value.toLowerCase().trim();
   const typeFilter = document.getElementById('filter-type').value;
-  const cicloFilter = document.getElementById('filter-ciclo').value;
 
   return allRecords.filter((r, i) => {
     r._idx = i;
     if (typeFilter !== 'all' && r.relacion !== typeFilter) return false;
-    if (cicloFilter !== 'all' && r.ciclo !== cicloFilter) return false;
+    // Checkbox filters for ciclo and grado
+    if (r.ciclo && !activeCiclos.has(r.ciclo)) return false;
+    if (r.grado && !activeGrados.has(r.grado)) return false;
     if (search) {
       const haystack = `${r.ci} ${r.primerNombre} ${r.primerApellido}`.toLowerCase();
       if (!haystack.includes(search)) return false;
@@ -823,8 +977,13 @@ function renderTable() {
 
   document.getElementById('count-badge').textContent = `${filtered.length} registros`;
 
+  // Update select-all checkbox state
+  const allEnabled = filtered.length > 0 && filtered.every(r => !disabledRecords.has(r._idx));
+  document.getElementById('select-all').checked = allEnabled;
+
   tbody.innerHTML = filtered.map((r, vi) => {
     const isDocente = r.relacion === 'DOCENTE';
+    const isDisabled = disabledRecords.has(r._idx);
     const anualidadDisplay = isDocente ? 'N/A' : (typeof r.anualidad === 'number' ? r.anualidad.toLocaleString('es-UY') : r.anualidad);
     const becaDisplay = r.becaTotal;
     const discountInfo = r.descuento !== null && !isDocente
@@ -833,25 +992,90 @@ function renderTable() {
           : `$${r.descuento.value.toLocaleString('es-UY')}`)
       : '';
 
-    return `<tr>
+    return `<tr class="${isDisabled ? 'row-disabled' : ''}">
+      <td><div class="checkbox-cell"><input type="checkbox" ${isDisabled ? '' : 'checked'} onchange="toggleRecord(${r._idx}, this)" title="Activar/desactivar"></div></td>
       <td style="color:var(--text-dim)">${vi+1}</td>
-      <td style="font-weight:600">${r.ci}</td>
-      <td>${r.fechaNac || ''}</td>
-      <td>${r.primerNombre}</td>
-      <td>${r.primerApellido}</td>
-      <td>${r.ciclo}</td>
-      <td>${r.grado}</td>
+      <td class="editable-cell" style="font-weight:600" ondblclick="editCell(this, ${r._idx}, 'ci')">${r.ci}</td>
+      <td class="editable-cell" ondblclick="editCell(this, ${r._idx}, 'fechaNac')">${r.fechaNac || ''}</td>
+      <td class="editable-cell" ondblclick="editCell(this, ${r._idx}, 'primerNombre')">${r.primerNombre}</td>
+      <td class="editable-cell" ondblclick="editCell(this, ${r._idx}, 'primerApellido')">${r.primerApellido}</td>
+      <td class="editable-cell" ondblclick="editCell(this, ${r._idx}, 'ciclo')">${r.ciclo}</td>
+      <td class="editable-cell" ondblclick="editCell(this, ${r._idx}, 'grado')">${r.grado}</td>
       <td><span class="badge ${isDocente ? 'badge-teacher' : 'badge-student'}">${r.relacion}</span></td>
-      <td style="text-align:right;font-weight:600;${r.becaTotal === 'SI' ? 'color:var(--green)' : ''}">${anualidadDisplay}</td>
+      <td class="${!isDocente ? 'editable-cell' : ''}" style="text-align:right;font-weight:600;${r.becaTotal === 'SI' ? 'color:var(--green)' : ''}" ${!isDocente ? `ondblclick="editCell(this, ${r._idx}, 'anualidad')"` : ''}>${anualidadDisplay}</td>
       <td>${becaDisplay === 'SI' ? '<span class="badge badge-beca">SI</span>' : becaDisplay}</td>
       <td>${isDocente ? '' : `<button class="btn btn-sm btn-outline" onclick="openDiscount(${r._idx})">${discountInfo || '⚙ Ajustar'}</button>`}</td>
     </tr>`;
   }).join('');
 }
 
+// Toggle individual record enabled/disabled
+function toggleRecord(idx, cb) {
+  if (cb.checked) {
+    disabledRecords.delete(idx);
+  } else {
+    disabledRecords.add(idx);
+  }
+  renderStep3(); // re-render stats too
+}
+
+// Select/deselect all visible records
+document.getElementById('select-all').addEventListener('change', (e) => {
+  const filtered = getFilteredRecords();
+  filtered.forEach(r => {
+    if (e.target.checked) {
+      disabledRecords.delete(r._idx);
+    } else {
+      disabledRecords.add(r._idx);
+    }
+  });
+  renderStep3();
+});
+
+// Inline cell editing
+function editCell(td, idx, field) {
+  // Don't edit if already editing
+  if (td.querySelector('.edit-input')) return;
+
+  const record = allRecords[idx];
+  const oldValue = record[field] || '';
+  const displayValue = field === 'anualidad' && typeof oldValue === 'number' ? String(oldValue) : String(oldValue);
+
+  td.classList.remove('editable-cell');
+  td.innerHTML = `<input class="edit-input" type="${field === 'anualidad' ? 'number' : 'text'}" value="${displayValue.replace(/"/g, '&quot;')}">`;
+
+  const input = td.querySelector('.edit-input');
+  input.focus();
+  input.select();
+
+  function commitEdit() {
+    let newValue = input.value.trim();
+
+    if (field === 'anualidad') {
+      newValue = parseFloat(newValue) || 0;
+      record.anualidad = newValue;
+      record.becaTotal = newValue === 0 ? 'SI' : 'NO';
+      record.descuento = { type: 'amount', value: newValue };
+    } else if (field === 'ci') {
+      record.ci = newValue.replace(/\D/g, '');
+    } else if (field === 'primerNombre' || field === 'primerApellido') {
+      record[field] = newValue.toUpperCase();
+    } else {
+      record[field] = newValue;
+    }
+
+    renderStep3();
+  }
+
+  input.addEventListener('blur', commitEdit);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { input.blur(); }
+    if (e.key === 'Escape') { renderTable(); } // cancel
+  });
+}
+
 document.getElementById('search-input').addEventListener('input', renderTable);
 document.getElementById('filter-type').addEventListener('change', renderTable);
-document.getElementById('filter-ciclo').addEventListener('change', renderTable);
 
 // ===== Discount Modal =====
 function openDiscount(idx) {
@@ -927,9 +1151,10 @@ document.getElementById('btn-download').addEventListener('click', () => {
 
   const data = [headers];
 
-  // Deduplicate by CI (keep first occurrence)
+  // Only include enabled records, deduplicate by CI (keep first occurrence)
   const seen = new Set();
-  allRecords.forEach(r => {
+  allRecords.forEach((r, i) => {
+    if (disabledRecords.has(i)) return; // skip disabled
     if (seen.has(r.ci)) return;
     seen.add(r.ci);
 
