@@ -476,6 +476,34 @@ let studentFileType = null; // 'primaria' or 'secundaria'
 let studentFileLoaded = false;
 let staffFileLoaded = false;
 
+// ===== Date cleaning utility =====
+// Handles: blank placeholders like '  /  /    ', 2-digit years, and normalizes to dd/mm/aaaa
+function cleanDate(raw) {
+  if (!raw) return '';
+  let d = raw.trim();
+  // Detect blank placeholder patterns like '  /  /    ' or '/ /' etc.
+  if (d.replace(/[\s\/]/g, '') === '') return '';
+
+  // Try to parse dd/mm/yy or dd/mm/yyyy
+  const match = d.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (!match) return d; // return as-is if unparseable
+
+  let [, day, month, year] = match;
+  day = day.padStart(2, '0');
+  month = month.padStart(2, '0');
+
+  // Convert 2-digit year to 4-digit
+  if (year.length === 2) {
+    const yy = parseInt(year);
+    // Students born in school are likely 2000s-2020s; anyone born <=25 is 20xx, >25 is 19xx
+    // Teachers born are likely 1960s-2000s
+    // Safe heuristic: <=30 -> 2000s, >30 -> 1900s
+    year = yy <= 30 ? '20' + year : '19' + year;
+  }
+
+  return `${day}/${month}/${year}`;
+}
+
 // ===== Course to Grade/Ciclo mapping =====
 function parseCurso(curso) {
   if (!curso) return { grado: '', ciclo: '' };
@@ -542,7 +570,7 @@ function parseStudentFile(wb) {
 
     const primerNombre = getVal(13).trim();
     const primerApellido = getVal(11).trim();
-    const fecNac = getVal(15);
+    const fecNac = cleanDate(getVal(15));
 
     const { grado, ciclo } = parseCurso(curso);
 
@@ -592,7 +620,7 @@ function parseStaffFile(wb) {
 
     const primerNombre = getVal(3).trim();
     const primerApellido = getVal(5).trim();
-    const fecNac = getVal(10);
+    const fecNac = cleanDate(getVal(10));
 
     // Determine ciclo based on cargo
     let ciclo = '';
