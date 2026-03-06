@@ -606,7 +606,7 @@ let currentEditIdx = null;
 let studentFileType = null; // 'primaria' or 'secundaria'
 let studentFileLoaded = false;
 let staffFileLoaded = false;
-const MAX_EXPORT_ROWS = 290;
+const MAX_ROWS_PER_FILE = 250;
 let disabledRecords = new Set(); // indices of disabled records
 let activeCiclos = new Set();    // checked ciclos
 let activeGrados = new Set();    // checked grados
@@ -931,16 +931,11 @@ function renderStep3() {
     </label>`;
   }).join('');
 
-  // Stats - only count enabled records
-  const enabledRecords = allRecords.filter((r, i) => !disabledRecords.has(i));
-  // Deduplicated count for export
-  const seenCIs = new Set();
-  const exportCount = enabledRecords.filter(r => {
-    if (seenCIs.has(r.ci)) return false;
-    seenCIs.add(r.ci);
-    return true;
-  }).length;
+  // Stats - only count records that will actually export
+  const exportRows = getExportRecords();
+  const exportCount = exportRows.length;
 
+  const enabledRecords = allRecords.filter((r, i) => !disabledRecords.has(i));
   const students = enabledRecords.filter(r => r.relacion === 'ESTUDIANTE');
   const docentes = enabledRecords.filter(r => r.relacion === 'DOCENTE');
   const becados = students.filter(r => r.becaTotal === 'SI');
@@ -965,20 +960,20 @@ function renderStep3() {
   `;
 
   // Update limit bar
-  const pct = Math.min((exportCount / MAX_EXPORT_ROWS) * 100, 100);
+  const fileCount = Math.ceil(exportCount / MAX_ROWS_PER_FILE) || 1;
+  const pct = Math.min((exportCount / MAX_ROWS_PER_FILE) * 100, 100);
   const limitBar = document.getElementById('limit-bar');
-  const over = exportCount > MAX_EXPORT_ROWS;
-  const warn = exportCount > MAX_EXPORT_ROWS * 0.85;
-  limitBar.className = 'limit-bar ' + (over ? 'over' : warn ? 'warn' : 'ok');
+  const warn = fileCount > 1;
+  limitBar.className = 'limit-bar ' + (warn ? 'warn' : 'ok');
   document.getElementById('limit-fill').style.width = pct + '%';
-  document.getElementById('limit-text').textContent = over
-    ? `${exportCount} / ${MAX_EXPORT_ROWS} — Excede el límite por ${exportCount - MAX_EXPORT_ROWS}`
-    : `${exportCount} / ${MAX_EXPORT_ROWS} filas para exportar`;
+  document.getElementById('limit-text').textContent = fileCount > 1
+    ? `${exportCount} registros → se generarán ${fileCount} archivos (máx ${MAX_ROWS_PER_FILE} por archivo)`
+    : `${exportCount} / ${MAX_ROWS_PER_FILE} filas para exportar (1 archivo)`;
 
-  // Enable/disable download button
+  // Download button always enabled if there are records
   const dlBtn = document.getElementById('btn-download');
-  dlBtn.disabled = over;
-  dlBtn.title = over ? `Desactivá al menos ${exportCount - MAX_EXPORT_ROWS} registros para poder descargar` : '';
+  dlBtn.disabled = exportCount === 0;
+  dlBtn.title = exportCount === 0 ? 'No hay registros activos para exportar' : '';
 
   renderTable();
 }
@@ -1201,34 +1196,23 @@ document.getElementById('discount-modal').addEventListener('click', (e) => {
   if (e.target === document.getElementById('discount-modal')) closeModal();
 });
 
-// ===== Download =====
-document.getElementById('btn-download').addEventListener('click', () => {
-  // Validate row limit before export
-  const enabledForExport = allRecords.filter((r, i) => !disabledRecords.has(i));
-  const uniqueCIs = new Set(enabledForExport.map(r => r.ci));
-  if (uniqueCIs.size > MAX_EXPORT_ROWS) {
-    alert(`No se puede exportar: tenés ${uniqueCIs.size} registros activos pero el máximo permitido es ${MAX_EXPORT_ROWS}.\n\nDesactivá al menos ${uniqueCIs.size - MAX_EXPORT_ROWS} registros usando las casillas de la tabla o los filtros.`);
-    return;
-  }
-
-  // Build data in template format
-  const headers = [
-    'Nº CI', 'FECHA NACIMIENTO', 'PRIMER NOMBRE', 'PRIMER APELLIDO',
-    'CICLO EDUCATIVO', 'GRADO', 'RELACIÓN CON EL CENTRO EDUCATIVO',
-    'ANUALIDAD ($U)', 'CON BECA TOTAL'
-  ];
-
-  const data = [headers];
-
-  // Only include enabled records, deduplicate by CI (keep first occurrence)
+// ===== Helper: get only selected records for export =====
+function getExportRecords() {
+  const rows = [];
   const seen = new Set();
+
   allRecords.forEach((r, i) => {
-    if (disabledRecords.has(i)) return; // skip disabled
+    // Skip disabled (unchecked) records
+    if (disabledRecords.has(i)) return;
+    // Skip records hidden by ciclo/grado checkbox filters
+    if (r.ciclo && !activeCiclos.has(r.ciclo)) return;
+    if (r.grado && !activeGrados.has(r.grado)) return;
+    // Deduplicate by CI
     if (seen.has(r.ci)) return;
     seen.add(r.ci);
 
     const isDocente = r.relacion === 'DOCENTE';
-    data.push([
+    rows.push([
       r.ci,
       r.fechaNac || '',
       r.primerNombre,
@@ -1241,17 +1225,58 @@ document.getElementById('btn-download').addEventListener('click', () => {
     ]);
   });
 
-  const ws = XLSX.utils.aoa_to_sheet(data);
+  return rows;
+}
 
-  // Set column widths
-  ws['!cols'] = [
+// ===== Download =====
+document.getElementById('btn-download').addEventListener('click', () => {
+  const headers = [
+    'Nº CI', 'FECHA NACIMIENTO', 'PRIMER NOMBRE', 'PRIMER APELLIDO',
+    'CICLO EDUCATIVO', 'GRADO', 'RELACIÓN CON EL CENTRO EDUCATIVO',
+    'ANUALIDAD ($U)', 'CON BECA TOTAL'
+  ];
+
+  const colWidths = [
     { wch: 12 }, { wch: 14 }, { wch: 18 }, { wch: 18 },
     { wch: 24 }, { wch: 12 }, { wch: 32 }, { wch: 16 }, { wch: 14 }
   ];
 
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, 'template_planilla');
-  XLSX.writeFile(wb, 'planilla_anualidades.xls', { bookType: 'xls' });
+  const rows = getExportRecords();
+
+  if (rows.length === 0) {
+    alert('No hay registros seleccionados para exportar.');
+    return;
+  }
+
+  // Split rows into chunks of MAX_ROWS_PER_FILE
+  const chunks = [];
+  for (let i = 0; i < rows.length; i += MAX_ROWS_PER_FILE) {
+    chunks.push(rows.slice(i, i + MAX_ROWS_PER_FILE));
+  }
+
+  if (chunks.length === 1) {
+    // Single file — download directly
+    const data = [headers, ...chunks[0]];
+    const ws = XLSX.utils.aoa_to_sheet(data);
+    ws['!cols'] = colWidths;
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'template_planilla');
+    XLSX.writeFile(wb, 'planilla_anualidades.xls', { bookType: 'xls' });
+  } else {
+    // Multiple files — download each with a part number
+    alert(`Se van a descargar ${chunks.length} archivos (${rows.length} registros, máx ${MAX_ROWS_PER_FILE} por archivo).`);
+    chunks.forEach((chunk, idx) => {
+      const data = [headers, ...chunk];
+      const ws = XLSX.utils.aoa_to_sheet(data);
+      ws['!cols'] = colWidths;
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'template_planilla');
+      // Small delay between downloads so the browser doesn't block them
+      setTimeout(() => {
+        XLSX.writeFile(wb, `planilla_anualidades_parte${idx + 1}.xls`, { bookType: 'xls' });
+      }, idx * 500);
+    });
+  }
 });
 </script>
 
