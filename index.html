@@ -622,6 +622,7 @@ let studentFileType = null; // 'primaria' or 'secundaria'
 let studentFileLoaded = false;
 let staffFileLoaded = false;
 const MAX_ROWS_PER_FILE = 250;
+const MIN_ROWS_PER_FILE = 240;
 let disabledRecords = new Set(); // indices of disabled records
 let activeCiclos = new Set();    // checked ciclos
 let activeGrados = new Set();    // checked grados
@@ -1170,21 +1171,36 @@ function renderStep3() {
 
   // Update limit bar
   const fileCount = Math.ceil(exportCount / MAX_ROWS_PER_FILE) || 1;
-  const pct = Math.min((exportCount / MAX_ROWS_PER_FILE) * 100, 100);
+  const pct = exportCount > 0 ? Math.min((exportCount / MIN_ROWS_PER_FILE) * 100, 100) : 0;
   const limitBar = document.getElementById('limit-bar');
-  const warn = fileCount > 1;
-  limitBar.className = 'limit-bar ' + (warn ? 'warn' : 'ok');
+  const belowMin = exportCount > 0 && exportCount < MIN_ROWS_PER_FILE;
+  const isMulti = fileCount > 1;
+  limitBar.className = 'limit-bar ' + (belowMin ? 'over' : isMulti ? 'warn' : 'ok');
   document.getElementById('limit-fill').style.width = pct + '%';
   const expStudents = exportRows.filter(r => r[6] !== 'DOCENTE').length;
   const expTeachers = exportRows.filter(r => r[6] === 'DOCENTE').length;
-  document.getElementById('limit-text').textContent = fileCount > 1
-    ? `${exportCount} registros (${expStudents} est. + ${expTeachers} doc.) → ${fileCount} archivos, distribución equitativa`
-    : `${exportCount} / ${MAX_ROWS_PER_FILE} filas (${expStudents} est. + ${expTeachers} doc.)`;
+  const faltan = MIN_ROWS_PER_FILE - exportCount;
+  if (belowMin) {
+    document.getElementById('limit-text').textContent =
+      `${exportCount} / ${MIN_ROWS_PER_FILE} mínimo — Faltan ${faltan} registros (${expStudents} est. + ${expTeachers} doc.)`;
+  } else if (isMulti) {
+    document.getElementById('limit-text').textContent =
+      `${exportCount} registros (${expStudents} est. + ${expTeachers} doc.) → ${fileCount} archivos, distribución equitativa`;
+  } else {
+    document.getElementById('limit-text').textContent =
+      `${exportCount} filas (${expStudents} est. + ${expTeachers} doc.) — Rango válido: ${MIN_ROWS_PER_FILE}–${MAX_ROWS_PER_FILE}`;
+  }
 
-  // Download button always enabled if there are records
+  // Disable download if below minimum or no records
   const dlBtn = document.getElementById('btn-download');
-  dlBtn.disabled = exportCount === 0;
-  dlBtn.title = exportCount === 0 ? 'No hay registros activos para exportar' : '';
+  dlBtn.disabled = exportCount === 0 || belowMin;
+  if (exportCount === 0) {
+    dlBtn.title = 'No hay registros activos para exportar';
+  } else if (belowMin) {
+    dlBtn.title = `Necesitás al menos ${MIN_ROWS_PER_FILE} registros. Faltan ${faltan}.`;
+  } else {
+    dlBtn.title = '';
+  }
 
   renderTable();
 }
@@ -1459,20 +1475,28 @@ document.getElementById('btn-download').addEventListener('click', () => {
     return;
   }
 
+  if (rows.length < MIN_ROWS_PER_FILE) {
+    alert(`No se puede exportar: tenés ${rows.length} registros pero el mínimo requerido es ${MIN_ROWS_PER_FILE}.\n\nFaltan ${MIN_ROWS_PER_FILE - rows.length} registros. Activá más registros o revisá los filtros.`);
+    return;
+  }
+
   // Separate students and teachers
   const studentRows = rows.filter(r => r[6] !== 'DOCENTE');
   const teacherRows = rows.filter(r => r[6] === 'DOCENTE');
   const totalRows = rows.length;
 
-  // Calculate number of files needed
-  const fileCount = Math.ceil(totalRows / MAX_ROWS_PER_FILE);
+  // Calculate optimal file count: each file must have between MIN and MAX rows
+  // Find the maximum number of files where each file has at least MIN_ROWS_PER_FILE
+  let fileCount = Math.ceil(totalRows / MAX_ROWS_PER_FILE);
+  while (fileCount > 1 && Math.floor(totalRows / fileCount) < MIN_ROWS_PER_FILE) {
+    fileCount--;
+  }
 
   // Distribute students and teachers proportionally across files
   const chunks = [];
   if (fileCount <= 1) {
     chunks.push([...studentRows, ...teacherRows]);
   } else {
-    // Calculate how many students and teachers per file
     const studentsPerFile = Math.ceil(studentRows.length / fileCount);
     const teachersPerFile = Math.ceil(teacherRows.length / fileCount);
 
