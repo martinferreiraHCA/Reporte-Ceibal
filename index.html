@@ -485,15 +485,15 @@
     </div>
 
     <div class="card" style="border-color:var(--accent);border-style:dashed;">
-      <div class="card-title"><span class="icon">💾</span> Retomar trabajo guardado (opcional)</div>
+      <div class="card-title"><span class="icon">💾</span> Retomar trabajo anterior (opcional)</div>
       <p style="color:var(--text-dim);font-size:0.82rem;margin-bottom:0.8rem;">
-        Si guardaste tu progreso anteriormente, subí el archivo <strong>progreso_planilla.xlsx</strong> para continuar donde dejaste.
+        Cargá un archivo de <strong>progreso guardado</strong> (progreso_planilla.xlsx) o una <strong>planilla exportada anteriormente</strong> (planilla_anualidades.xls) para retomar los valores.
       </p>
       <div class="upload-zone" id="dropzone-progress">
         <input type="file" accept=".xlsx,.xls" id="file-progress">
         <div class="icon-big">💾</div>
-        <div class="label">Cargar progreso guardado</div>
-        <div class="sublabel">progreso_planilla.xlsx</div>
+        <div class="label">Cargar archivo anterior</div>
+        <div class="sublabel">progreso_planilla.xlsx o planilla_anualidades.xls</div>
       </div>
       <div class="file-info hidden" id="info-progress"></div>
     </div>
@@ -871,67 +871,182 @@ document.getElementById('file-progress').addEventListener('change', async (e) =>
   try {
     const wb = await readFile(file);
 
-    // Read metadata sheet
+    // Detect format: new progress file has '__meta' sheet, old export has 'template_planilla'
     const metaWs = wb.Sheets['__meta'];
-    if (!metaWs) {
-      alert('Este archivo no es un progreso guardado válido. Usá un archivo generado con "Guardar progreso completo".');
-      return;
-    }
-    const metaData = XLSX.utils.sheet_to_json(metaWs);
-    if (metaData.length > 0) {
-      anualidadBase = metaData[0].anualidadBase || 0;
-      studentFileType = metaData[0].studentFileType || null;
-    }
-
-    // Read records sheet
     const dataWs = wb.Sheets['datos'];
-    if (!dataWs) {
-      alert('El archivo no contiene la hoja de datos.');
-      return;
-    }
-    const rows = XLSX.utils.sheet_to_json(dataWs);
-    allRecords = [];
-    disabledRecords = new Set();
+    const templateWs = wb.Sheets['template_planilla'];
+    // Also try first sheet as fallback for old exports
+    const firstWs = wb.Sheets[wb.SheetNames[0]];
 
-    rows.forEach((row, i) => {
-      const record = {
-        ci: String(row['CI'] || ''),
-        fechaNac: String(row['FECHA_NAC'] || ''),
-        primerNombre: String(row['PRIMER_NOMBRE'] || ''),
-        primerApellido: String(row['PRIMER_APELLIDO'] || ''),
-        ciclo: String(row['CICLO'] || ''),
-        grado: String(row['GRADO'] || ''),
-        relacion: String(row['RELACION'] || ''),
-        anualidad: row['RELACION'] === 'DOCENTE' ? 'N/A' : (Number(row['ANUALIDAD']) || 0),
-        becaTotal: row['RELACION'] === 'DOCENTE' ? 'N/A' : String(row['BECA_TOTAL'] || 'NO'),
-        descuento: null,
-        cursoOriginal: String(row['CURSO_ORIGINAL'] || ''),
-        cargo: String(row['CARGO'] || '')
-      };
+    if (metaWs && dataWs) {
+      // ===== NEW FORMAT: progreso_planilla.xlsx =====
+      const metaData = XLSX.utils.sheet_to_json(metaWs);
+      if (metaData.length > 0) {
+        anualidadBase = metaData[0].anualidadBase || 0;
+        studentFileType = metaData[0].studentFileType || null;
+      }
 
-      // Restore discount
-      if (row['DESCUENTO_TIPO'] && row['DESCUENTO_VALOR'] !== undefined && row['DESCUENTO_VALOR'] !== '') {
-        record.descuento = {
-          type: String(row['DESCUENTO_TIPO']),
-          value: Number(row['DESCUENTO_VALOR'])
+      const rows = XLSX.utils.sheet_to_json(dataWs);
+      allRecords = [];
+      disabledRecords = new Set();
+
+      rows.forEach((row, i) => {
+        const record = {
+          ci: String(row['CI'] || ''),
+          fechaNac: String(row['FECHA_NAC'] || ''),
+          primerNombre: String(row['PRIMER_NOMBRE'] || ''),
+          primerApellido: String(row['PRIMER_APELLIDO'] || ''),
+          ciclo: String(row['CICLO'] || ''),
+          grado: String(row['GRADO'] || ''),
+          relacion: String(row['RELACION'] || ''),
+          anualidad: row['RELACION'] === 'DOCENTE' ? 'N/A' : (Number(row['ANUALIDAD']) || 0),
+          becaTotal: row['RELACION'] === 'DOCENTE' ? 'N/A' : String(row['BECA_TOTAL'] || 'NO'),
+          descuento: null,
+          cursoOriginal: String(row['CURSO_ORIGINAL'] || ''),
+          cargo: String(row['CARGO'] || '')
         };
+
+        if (row['DESCUENTO_TIPO'] && row['DESCUENTO_VALOR'] !== undefined && row['DESCUENTO_VALOR'] !== '') {
+          record.descuento = {
+            type: String(row['DESCUENTO_TIPO']),
+            value: Number(row['DESCUENTO_VALOR'])
+          };
+        }
+
+        allRecords.push(record);
+
+        if (row['ACTIVO'] === 'NO') {
+          disabledRecords.add(i);
+        }
+      });
+
+      document.getElementById('info-progress').classList.remove('hidden');
+      document.getElementById('info-progress').textContent =
+        `✓ ${file.name} — ${allRecords.length} registros restaurados (progreso guardado, anualidad base: $${anualidadBase.toLocaleString('es-UY')})`;
+
+    } else {
+      // ===== OLD FORMAT: planilla_anualidades.xls (template_planilla or first sheet) =====
+      const ws = templateWs || firstWs;
+      if (!ws) {
+        alert('No se pudo leer el archivo. Verificá que sea una planilla exportada o un archivo de progreso.');
+        return;
       }
 
-      allRecords.push(record);
-
-      // Restore disabled state
-      if (row['ACTIVO'] === 'NO') {
-        disabledRecords.add(i);
+      const rows = XLSX.utils.sheet_to_json(ws);
+      if (rows.length === 0) {
+        alert('El archivo está vacío.');
+        return;
       }
-    });
+
+      // Detect columns by checking first row keys
+      const firstRow = rows[0];
+      const keys = Object.keys(firstRow);
+
+      // Map old header names to fields
+      // Old headers: 'Nº CI', 'FECHA NACIMIENTO', 'PRIMER NOMBRE', 'PRIMER APELLIDO',
+      //              'CICLO EDUCATIVO', 'GRADO', 'RELACIÓN CON EL CENTRO EDUCATIVO',
+      //              'ANUALIDAD ($U)', 'CON BECA TOTAL'
+      function findKey(keys, patterns) {
+        for (const k of keys) {
+          const kl = k.toLowerCase().trim();
+          for (const p of patterns) {
+            if (kl.includes(p)) return k;
+          }
+        }
+        return null;
+      }
+
+      const keyCI = findKey(keys, ['ci', 'cédula', 'cedula', 'documento']);
+      const keyFecha = findKey(keys, ['fecha', 'nacimiento']);
+      const keyNombre = findKey(keys, ['primer nombre', 'nombre']);
+      const keyApellido = findKey(keys, ['primer apellido', 'apellido']);
+      const keyCiclo = findKey(keys, ['ciclo']);
+      const keyGrado = findKey(keys, ['grado']);
+      const keyRelacion = findKey(keys, ['relación', 'relacion']);
+      const keyAnualidad = findKey(keys, ['anualidad']);
+      const keyBeca = findKey(keys, ['beca']);
+
+      if (!keyCI || !keyNombre) {
+        alert('No se pudieron detectar las columnas del archivo. Verificá que tenga los encabezados correctos (Nº CI, PRIMER NOMBRE, etc.).');
+        return;
+      }
+
+      allRecords = [];
+      disabledRecords = new Set();
+
+      rows.forEach(row => {
+        const ci = String(row[keyCI] || '').replace(/\D/g, '');
+        if (!ci) return;
+
+        const relacion = keyRelacion ? String(row[keyRelacion] || '').toUpperCase().trim() : 'ESTUDIANTE';
+        const isDocente = relacion === 'DOCENTE';
+
+        let anualidadVal = 0;
+        if (keyAnualidad) {
+          const raw = row[keyAnualidad];
+          if (raw === 'N/A' || raw === 'n/a') {
+            anualidadVal = isDocente ? 'N/A' : 0;
+          } else {
+            anualidadVal = isDocente ? 'N/A' : (Number(raw) || 0);
+          }
+        } else {
+          anualidadVal = isDocente ? 'N/A' : 0;
+        }
+
+        let becaVal = 'NO';
+        if (keyBeca) {
+          const raw = String(row[keyBeca] || '').toUpperCase().trim();
+          becaVal = (raw === 'N/A') ? (isDocente ? 'N/A' : 'NO') : raw;
+        }
+        if (isDocente) becaVal = 'N/A';
+
+        const record = {
+          ci: ci,
+          fechaNac: keyFecha ? String(row[keyFecha] || '') : '',
+          primerNombre: keyNombre ? String(row[keyNombre] || '').toUpperCase().trim() : '',
+          primerApellido: keyApellido ? String(row[keyApellido] || '').toUpperCase().trim() : '',
+          ciclo: keyCiclo ? String(row[keyCiclo] || '').trim() : '',
+          grado: keyGrado ? String(row[keyGrado] || '').trim() : '',
+          relacion: isDocente ? 'DOCENTE' : 'ESTUDIANTE',
+          anualidad: anualidadVal,
+          becaTotal: becaVal,
+          descuento: null,
+          cursoOriginal: '',
+          cargo: ''
+        };
+
+        // If student has a specific anualidad, set it as custom discount
+        if (!isDocente && typeof anualidadVal === 'number' && anualidadVal > 0) {
+          record.descuento = { type: 'amount', value: anualidadVal };
+        }
+
+        allRecords.push(record);
+      });
+
+      if (allRecords.length === 0) {
+        alert('No se encontraron registros válidos en el archivo.');
+        return;
+      }
+
+      // Try to infer anualidad base from most common anualidad value among students
+      const studentAnualidades = allRecords
+        .filter(r => r.relacion === 'ESTUDIANTE' && typeof r.anualidad === 'number' && r.anualidad > 0)
+        .map(r => r.anualidad);
+      if (studentAnualidades.length > 0) {
+        const freq = {};
+        studentAnualidades.forEach(v => { freq[v] = (freq[v] || 0) + 1; });
+        anualidadBase = Number(Object.entries(freq).sort((a, b) => b[1] - a[1])[0][0]);
+      }
+
+      document.getElementById('info-progress').classList.remove('hidden');
+      document.getElementById('info-progress').textContent =
+        `✓ ${file.name} — ${allRecords.length} registros importados desde planilla exportada (anualidad base detectada: $${anualidadBase.toLocaleString('es-UY')})`;
+    }
 
     studentFileLoaded = true;
     staffFileLoaded = true;
-
-    // Update UI
-    document.getElementById('info-progress').classList.remove('hidden');
-    document.getElementById('info-progress').textContent =
-      `✓ ${file.name} — ${allRecords.length} registros restaurados (anualidad base: $${anualidadBase.toLocaleString('es-UY')})`;
+    activeCiclos = new Set();
+    activeGrados = new Set();
 
     // Set anualidad base input and enable step 2 button
     document.getElementById('anualidad-base').value = anualidadBase;
@@ -939,7 +1054,7 @@ document.getElementById('file-progress').addEventListener('change', async (e) =>
 
     updateNextBtn();
   } catch(err) {
-    alert('Error al leer el archivo de progreso: ' + err.message);
+    alert('Error al leer el archivo: ' + err.message);
   }
 });
 
