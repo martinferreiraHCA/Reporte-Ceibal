@@ -484,6 +484,20 @@
       <div class="file-info hidden" id="info-staff"></div>
     </div>
 
+    <div class="card" style="border-color:var(--accent);border-style:dashed;">
+      <div class="card-title"><span class="icon">💾</span> Retomar trabajo guardado (opcional)</div>
+      <p style="color:var(--text-dim);font-size:0.82rem;margin-bottom:0.8rem;">
+        Si guardaste tu progreso anteriormente, subí el archivo <strong>progreso_planilla.xlsx</strong> para continuar donde dejaste.
+      </p>
+      <div class="upload-zone" id="dropzone-progress">
+        <input type="file" accept=".xlsx,.xls" id="file-progress">
+        <div class="icon-big">💾</div>
+        <div class="label">Cargar progreso guardado</div>
+        <div class="sublabel">progreso_planilla.xlsx</div>
+      </div>
+      <div class="file-info hidden" id="info-progress"></div>
+    </div>
+
     <button class="btn btn-primary" id="btn-next1" disabled>Continuar →</button>
   </div>
 
@@ -567,9 +581,10 @@
       </div>
     </div>
 
-    <div style="display:flex;gap:0.8rem;margin-top:1rem;">
+    <div style="display:flex;gap:0.8rem;margin-top:1rem;flex-wrap:wrap;">
       <button class="btn btn-outline" id="btn-back3">← Volver</button>
       <button class="btn btn-success" id="btn-download">⬇ Descargar Planilla .xls</button>
+      <button class="btn btn-primary" id="btn-save-progress">💾 Guardar progreso completo</button>
     </div>
   </div>
 </div>
@@ -849,12 +864,91 @@ document.getElementById('file-staff').addEventListener('change', async (e) => {
   }
 });
 
+// ===== Load saved progress =====
+document.getElementById('file-progress').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    const wb = await readFile(file);
+
+    // Read metadata sheet
+    const metaWs = wb.Sheets['__meta'];
+    if (!metaWs) {
+      alert('Este archivo no es un progreso guardado válido. Usá un archivo generado con "Guardar progreso completo".');
+      return;
+    }
+    const metaData = XLSX.utils.sheet_to_json(metaWs);
+    if (metaData.length > 0) {
+      anualidadBase = metaData[0].anualidadBase || 0;
+      studentFileType = metaData[0].studentFileType || null;
+    }
+
+    // Read records sheet
+    const dataWs = wb.Sheets['datos'];
+    if (!dataWs) {
+      alert('El archivo no contiene la hoja de datos.');
+      return;
+    }
+    const rows = XLSX.utils.sheet_to_json(dataWs);
+    allRecords = [];
+    disabledRecords = new Set();
+
+    rows.forEach((row, i) => {
+      const record = {
+        ci: String(row['CI'] || ''),
+        fechaNac: String(row['FECHA_NAC'] || ''),
+        primerNombre: String(row['PRIMER_NOMBRE'] || ''),
+        primerApellido: String(row['PRIMER_APELLIDO'] || ''),
+        ciclo: String(row['CICLO'] || ''),
+        grado: String(row['GRADO'] || ''),
+        relacion: String(row['RELACION'] || ''),
+        anualidad: row['RELACION'] === 'DOCENTE' ? 'N/A' : (Number(row['ANUALIDAD']) || 0),
+        becaTotal: row['RELACION'] === 'DOCENTE' ? 'N/A' : String(row['BECA_TOTAL'] || 'NO'),
+        descuento: null,
+        cursoOriginal: String(row['CURSO_ORIGINAL'] || ''),
+        cargo: String(row['CARGO'] || '')
+      };
+
+      // Restore discount
+      if (row['DESCUENTO_TIPO'] && row['DESCUENTO_VALOR'] !== undefined && row['DESCUENTO_VALOR'] !== '') {
+        record.descuento = {
+          type: String(row['DESCUENTO_TIPO']),
+          value: Number(row['DESCUENTO_VALOR'])
+        };
+      }
+
+      allRecords.push(record);
+
+      // Restore disabled state
+      if (row['ACTIVO'] === 'NO') {
+        disabledRecords.add(i);
+      }
+    });
+
+    studentFileLoaded = true;
+    staffFileLoaded = true;
+
+    // Update UI
+    document.getElementById('info-progress').classList.remove('hidden');
+    document.getElementById('info-progress').textContent =
+      `✓ ${file.name} — ${allRecords.length} registros restaurados (anualidad base: $${anualidadBase.toLocaleString('es-UY')})`;
+
+    // Set anualidad base input and enable step 2 button
+    document.getElementById('anualidad-base').value = anualidadBase;
+    document.getElementById('btn-next2').disabled = !anualidadBase;
+
+    updateNextBtn();
+  } catch(err) {
+    alert('Error al leer el archivo de progreso: ' + err.message);
+  }
+});
+
 function updateNextBtn() {
   document.getElementById('btn-next1').disabled = !studentFileLoaded;
 }
 
 // ===== Drag & drop =====
-['dropzone-students', 'dropzone-staff'].forEach(id => {
+['dropzone-students', 'dropzone-staff', 'dropzone-progress'].forEach(id => {
   const zone = document.getElementById(id);
   zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('dragover'); });
   zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
@@ -987,7 +1081,7 @@ function toggleCiclo(cb) {
     activeCiclos.delete(ciclo);
     cb.parentElement.classList.add('unchecked');
   }
-  renderTable();
+  renderStep3();
 }
 
 function toggleGrado(cb) {
@@ -999,7 +1093,7 @@ function toggleGrado(cb) {
     activeGrados.delete(grado);
     cb.parentElement.classList.add('unchecked');
   }
-  renderTable();
+  renderStep3();
 }
 
 // Toggle filter panel visibility
@@ -1277,6 +1371,59 @@ document.getElementById('btn-download').addEventListener('click', () => {
       }, idx * 500);
     });
   }
+});
+
+// ===== Save full progress =====
+document.getElementById('btn-save-progress').addEventListener('click', () => {
+  if (allRecords.length === 0) {
+    alert('No hay registros para guardar.');
+    return;
+  }
+
+  // Sheet 1: all records with full state
+  const dataHeaders = [
+    'CI', 'FECHA_NAC', 'PRIMER_NOMBRE', 'PRIMER_APELLIDO',
+    'CICLO', 'GRADO', 'RELACION', 'ANUALIDAD', 'BECA_TOTAL',
+    'DESCUENTO_TIPO', 'DESCUENTO_VALOR', 'CURSO_ORIGINAL', 'CARGO', 'ACTIVO'
+  ];
+
+  const dataRows = allRecords.map((r, i) => [
+    r.ci,
+    r.fechaNac || '',
+    r.primerNombre,
+    r.primerApellido,
+    r.ciclo,
+    r.grado,
+    r.relacion,
+    r.relacion === 'DOCENTE' ? '' : (typeof r.anualidad === 'number' ? r.anualidad : 0),
+    r.relacion === 'DOCENTE' ? '' : r.becaTotal,
+    r.descuento ? r.descuento.type : '',
+    r.descuento ? r.descuento.value : '',
+    r.cursoOriginal || '',
+    r.cargo || '',
+    disabledRecords.has(i) ? 'NO' : 'SI'
+  ]);
+
+  const dataSheet = XLSX.utils.aoa_to_sheet([dataHeaders, ...dataRows]);
+  dataSheet['!cols'] = [
+    { wch: 12 }, { wch: 14 }, { wch: 18 }, { wch: 18 },
+    { wch: 24 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 12 },
+    { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 30 }, { wch: 8 }
+  ];
+
+  // Sheet 2: metadata
+  const metaSheet = XLSX.utils.json_to_sheet([{
+    anualidadBase: anualidadBase,
+    studentFileType: studentFileType || '',
+    savedAt: new Date().toLocaleString('es-UY'),
+    totalRecords: allRecords.length,
+    activeRecords: allRecords.length - disabledRecords.size
+  }]);
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, dataSheet, 'datos');
+  XLSX.utils.book_append_sheet(wb, metaSheet, '__meta');
+  XLSX.writeFile(wb, 'progreso_planilla.xlsx', { bookType: 'xlsx' });
 });
 </script>
 
