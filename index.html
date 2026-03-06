@@ -656,6 +656,14 @@ function cleanDate(raw) {
   return `${day}/${month}/${year}`;
 }
 
+// ===== Normalize ciclo names (remove accents) =====
+function normalizeCiclo(ciclo) {
+  if (!ciclo) return ciclo;
+  return ciclo
+    .replace(/EDUCACI[OÓ]N/gi, 'EDUCACION')
+    .replace(/B[AÁ]SICA/gi, 'BASICA');
+}
+
 // ===== Course to Grade/Ciclo mapping =====
 function parseCurso(curso) {
   if (!curso) return { grado: '', ciclo: '' };
@@ -897,7 +905,7 @@ document.getElementById('file-progress').addEventListener('change', async (e) =>
           fechaNac: String(row['FECHA_NAC'] || ''),
           primerNombre: String(row['PRIMER_NOMBRE'] || ''),
           primerApellido: String(row['PRIMER_APELLIDO'] || ''),
-          ciclo: String(row['CICLO'] || ''),
+          ciclo: normalizeCiclo(String(row['CICLO'] || '')),
           grado: String(row['GRADO'] || ''),
           relacion: String(row['RELACION'] || ''),
           anualidad: row['RELACION'] === 'DOCENTE' ? 'N/A' : (Number(row['ANUALIDAD']) || 0),
@@ -1006,7 +1014,7 @@ document.getElementById('file-progress').addEventListener('change', async (e) =>
           fechaNac: keyFecha ? String(row[keyFecha] || '') : '',
           primerNombre: keyNombre ? String(row[keyNombre] || '').toUpperCase().trim() : '',
           primerApellido: keyApellido ? String(row[keyApellido] || '').toUpperCase().trim() : '',
-          ciclo: keyCiclo ? String(row[keyCiclo] || '').trim() : '',
+          ciclo: keyCiclo ? normalizeCiclo(String(row[keyCiclo] || '').trim()) : '',
           grado: keyGrado ? String(row[keyGrado] || '').trim() : '',
           relacion: isDocente ? 'DOCENTE' : 'ESTUDIANTE',
           anualidad: anualidadVal,
