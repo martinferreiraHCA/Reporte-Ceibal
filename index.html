@@ -290,6 +290,37 @@
     border-radius: 99px;
   }
 
+  .limit-bar {
+    display: flex; align-items: center; gap: 1rem;
+    padding: 0.7rem 1rem;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    margin-bottom: 1rem;
+    background: var(--surface);
+  }
+  .limit-bar .limit-text {
+    font-size: 0.82rem; font-weight: 600;
+    white-space: nowrap;
+  }
+  .limit-bar .limit-progress {
+    flex: 1; height: 8px;
+    background: var(--surface2);
+    border-radius: 99px;
+    overflow: hidden;
+  }
+  .limit-bar .limit-fill {
+    height: 100%;
+    border-radius: 99px;
+    transition: width 0.3s, background 0.3s;
+  }
+  .limit-bar.ok .limit-fill { background: var(--green); }
+  .limit-bar.ok .limit-text { color: var(--green); }
+  .limit-bar.warn .limit-fill { background: var(--orange); }
+  .limit-bar.warn .limit-text { color: var(--orange); }
+  .limit-bar.over .limit-fill { background: var(--red); }
+  .limit-bar.over .limit-text { color: var(--red); }
+  .limit-bar.over { border-color: var(--red); background: var(--red-dim); }
+
   /* Responsive */
   @media (max-width: 768px) {
     .container { padding: 1rem; }
@@ -481,6 +512,11 @@
   <div id="step3" class="hidden">
     <div class="stats-row" id="stats-row"></div>
 
+    <div class="limit-bar" id="limit-bar">
+      <div class="limit-text" id="limit-text">0 / 290</div>
+      <div class="limit-progress"><div class="limit-fill" id="limit-fill" style="width:0%"></div></div>
+    </div>
+
     <div class="card" style="padding:1rem;">
       <div class="action-bar">
         <div class="search-bar" style="flex:1;margin-bottom:0;">
@@ -570,6 +606,7 @@ let currentEditIdx = null;
 let studentFileType = null; // 'primaria' or 'secundaria'
 let studentFileLoaded = false;
 let staffFileLoaded = false;
+const MAX_EXPORT_ROWS = 290;
 let disabledRecords = new Set(); // indices of disabled records
 let activeCiclos = new Set();    // checked ciclos
 let activeGrados = new Set();    // checked grados
@@ -896,6 +933,14 @@ function renderStep3() {
 
   // Stats - only count enabled records
   const enabledRecords = allRecords.filter((r, i) => !disabledRecords.has(i));
+  // Deduplicated count for export
+  const seenCIs = new Set();
+  const exportCount = enabledRecords.filter(r => {
+    if (seenCIs.has(r.ci)) return false;
+    seenCIs.add(r.ci);
+    return true;
+  }).length;
+
   const students = enabledRecords.filter(r => r.relacion === 'ESTUDIANTE');
   const docentes = enabledRecords.filter(r => r.relacion === 'DOCENTE');
   const becados = students.filter(r => r.becaTotal === 'SI');
@@ -918,6 +963,22 @@ function renderStep3() {
       <div class="stat-label">Beca total</div>
     </div>
   `;
+
+  // Update limit bar
+  const pct = Math.min((exportCount / MAX_EXPORT_ROWS) * 100, 100);
+  const limitBar = document.getElementById('limit-bar');
+  const over = exportCount > MAX_EXPORT_ROWS;
+  const warn = exportCount > MAX_EXPORT_ROWS * 0.85;
+  limitBar.className = 'limit-bar ' + (over ? 'over' : warn ? 'warn' : 'ok');
+  document.getElementById('limit-fill').style.width = pct + '%';
+  document.getElementById('limit-text').textContent = over
+    ? `${exportCount} / ${MAX_EXPORT_ROWS} — Excede el límite por ${exportCount - MAX_EXPORT_ROWS}`
+    : `${exportCount} / ${MAX_EXPORT_ROWS} filas para exportar`;
+
+  // Enable/disable download button
+  const dlBtn = document.getElementById('btn-download');
+  dlBtn.disabled = over;
+  dlBtn.title = over ? `Desactivá al menos ${exportCount - MAX_EXPORT_ROWS} registros para poder descargar` : '';
 
   renderTable();
 }
@@ -1142,6 +1203,14 @@ document.getElementById('discount-modal').addEventListener('click', (e) => {
 
 // ===== Download =====
 document.getElementById('btn-download').addEventListener('click', () => {
+  // Validate row limit before export
+  const enabledForExport = allRecords.filter((r, i) => !disabledRecords.has(i));
+  const uniqueCIs = new Set(enabledForExport.map(r => r.ci));
+  if (uniqueCIs.size > MAX_EXPORT_ROWS) {
+    alert(`No se puede exportar: tenés ${uniqueCIs.size} registros activos pero el máximo permitido es ${MAX_EXPORT_ROWS}.\n\nDesactivá al menos ${uniqueCIs.size - MAX_EXPORT_ROWS} registros usando las casillas de la tabla o los filtros.`);
+    return;
+  }
+
   // Build data in template format
   const headers = [
     'Nº CI', 'FECHA NACIMIENTO', 'PRIMER NOMBRE', 'PRIMER APELLIDO',
