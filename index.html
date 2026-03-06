@@ -671,7 +671,7 @@ function parseCurso(curso) {
     if (num >= 1 && num <= 6) {
       return { grado: String(num), ciclo: 'PRIMARIA' };
     } else if (num >= 7 && num <= 9) {
-      return { grado: String(num), ciclo: 'EDUCACIÓN MEDIA BÁSICA' };
+      return { grado: String(num), ciclo: 'EDUCACION MEDIA BASICA' };
     }
   }
   if (curso.includes('EMS')) {
@@ -781,16 +781,16 @@ function parseStaffFile(wb) {
     } else if (cargo.toLowerCase().includes('primaria') || cargo.toLowerCase().includes('maestra referente') || cargo.toLowerCase().includes('maestra especializada')) {
       ciclo = 'PRIMARIA';
     } else if (cargo.toLowerCase().includes('liceo') || cargo.toLowerCase().includes('profesor')) {
-      ciclo = 'EDUCACIÓN MEDIA BÁSICA';
+      ciclo = 'EDUCACION MEDIA BASICA';
     }
     // Directors
     if (cargo.toLowerCase().includes('director colegio')) ciclo = 'PRIMARIA';
-    if (cargo.toLowerCase().includes('director liceo')) ciclo = 'EDUCACIÓN MEDIA BÁSICA';
+    if (cargo.toLowerCase().includes('director liceo')) ciclo = 'EDUCACION MEDIA BASICA';
 
     // If still empty and has multiple roles, pick first relevant one
     if (!ciclo) {
       if (cargo.toLowerCase().includes('maestr')) ciclo = 'PRIMARIA';
-      else ciclo = 'EDUCACIÓN MEDIA BÁSICA';
+      else ciclo = 'EDUCACION MEDIA BASICA';
     }
 
     records.push({
