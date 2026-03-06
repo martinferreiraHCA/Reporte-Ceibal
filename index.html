@@ -1175,9 +1175,11 @@ function renderStep3() {
   const warn = fileCount > 1;
   limitBar.className = 'limit-bar ' + (warn ? 'warn' : 'ok');
   document.getElementById('limit-fill').style.width = pct + '%';
+  const expStudents = exportRows.filter(r => r[6] !== 'DOCENTE').length;
+  const expTeachers = exportRows.filter(r => r[6] === 'DOCENTE').length;
   document.getElementById('limit-text').textContent = fileCount > 1
-    ? `${exportCount} registros → se generarán ${fileCount} archivos (máx ${MAX_ROWS_PER_FILE} por archivo)`
-    : `${exportCount} / ${MAX_ROWS_PER_FILE} filas para exportar (1 archivo)`;
+    ? `${exportCount} registros (${expStudents} est. + ${expTeachers} doc.) → ${fileCount} archivos, distribución equitativa`
+    : `${exportCount} / ${MAX_ROWS_PER_FILE} filas (${expStudents} est. + ${expTeachers} doc.)`;
 
   // Download button always enabled if there are records
   const dlBtn = document.getElementById('btn-download');
@@ -1457,10 +1459,31 @@ document.getElementById('btn-download').addEventListener('click', () => {
     return;
   }
 
-  // Split rows into chunks of MAX_ROWS_PER_FILE
+  // Separate students and teachers
+  const studentRows = rows.filter(r => r[6] !== 'DOCENTE');
+  const teacherRows = rows.filter(r => r[6] === 'DOCENTE');
+  const totalRows = rows.length;
+
+  // Calculate number of files needed
+  const fileCount = Math.ceil(totalRows / MAX_ROWS_PER_FILE);
+
+  // Distribute students and teachers proportionally across files
   const chunks = [];
-  for (let i = 0; i < rows.length; i += MAX_ROWS_PER_FILE) {
-    chunks.push(rows.slice(i, i + MAX_ROWS_PER_FILE));
+  if (fileCount <= 1) {
+    chunks.push([...studentRows, ...teacherRows]);
+  } else {
+    // Calculate how many students and teachers per file
+    const studentsPerFile = Math.ceil(studentRows.length / fileCount);
+    const teachersPerFile = Math.ceil(teacherRows.length / fileCount);
+
+    for (let f = 0; f < fileCount; f++) {
+      const sStart = f * studentsPerFile;
+      const sSlice = studentRows.slice(sStart, sStart + studentsPerFile);
+      const tStart = f * teachersPerFile;
+      const tSlice = teacherRows.slice(tStart, tStart + teachersPerFile);
+      const chunk = [...sSlice, ...tSlice];
+      if (chunk.length > 0) chunks.push(chunk);
+    }
   }
 
   if (chunks.length === 1) {
@@ -1472,8 +1495,13 @@ document.getElementById('btn-download').addEventListener('click', () => {
     XLSX.utils.book_append_sheet(wb, ws, 'template_planilla');
     XLSX.writeFile(wb, 'planilla_anualidades.xls', { bookType: 'xls' });
   } else {
-    // Multiple files — download each with a part number
-    alert(`Se van a descargar ${chunks.length} archivos (${rows.length} registros, máx ${MAX_ROWS_PER_FILE} por archivo).`);
+    // Multiple files — download each with a part number, balanced distribution
+    const detail = chunks.map((chunk, i) => {
+      const s = chunk.filter(r => r[6] !== 'DOCENTE').length;
+      const t = chunk.filter(r => r[6] === 'DOCENTE').length;
+      return `  Parte ${i+1}: ${chunk.length} registros (${s} estudiantes, ${t} docentes)`;
+    }).join('\n');
+    alert(`Se van a descargar ${chunks.length} archivos con distribución equitativa:\n\n${detail}`);
     chunks.forEach((chunk, idx) => {
       const data = [headers, ...chunk];
       const ws = XLSX.utils.aoa_to_sheet(data);
