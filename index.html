@@ -434,6 +434,16 @@
   }
   .toggle-filters-btn:hover { border-color: var(--accent); color: var(--accent); }
   .toggle-filters-btn.active { border-color: var(--accent); color: var(--accent); background: var(--accent-glow); }
+
+  .mode-card {
+    flex: 1; min-width: 200px;
+    padding: 1.5rem; border: 2px solid var(--border);
+    border-radius: var(--radius); cursor: pointer;
+    text-align: center; transition: all 0.2s;
+    background: var(--surface2);
+  }
+  .mode-card:hover { border-color: var(--accent); background: var(--accent-glow); }
+  .mode-card.selected { border-color: var(--accent); background: var(--accent-glow); }
 </style>
 </head>
 <body>
@@ -452,12 +462,16 @@
       <span class="step-num">1</span> Cargar archivos
     </div>
     <span class="step-connector">→</span>
+    <div class="step-indicator" id="step-mode-ind">
+      <span class="step-num">2</span> Elegir acción
+    </div>
+    <span class="step-connector">→</span>
     <div class="step-indicator" id="step2-ind">
-      <span class="step-num">2</span> Configurar anualidad
+      <span class="step-num">3</span> Configurar
     </div>
     <span class="step-connector">→</span>
     <div class="step-indicator" id="step3-ind">
-      <span class="step-num">3</span> Revisar y descargar
+      <span class="step-num">4</span> Revisar y descargar
     </div>
   </div>
 
@@ -502,7 +516,58 @@
     <button class="btn btn-primary" id="btn-next1" disabled>Continuar →</button>
   </div>
 
-  <!-- Step 2: Configure -->
+  <!-- Step Mode: Choose action -->
+  <div id="step-mode" class="hidden">
+    <div class="card">
+      <div class="card-title"><span class="icon">🔀</span> ¿Qué querés hacer?</div>
+      <p style="color:var(--text-dim);font-size:0.85rem;margin-bottom:1.2rem;">
+        Elegí la acción que querés realizar con los datos cargados.
+      </p>
+      <div style="display:flex;gap:1rem;flex-wrap:wrap;">
+        <div class="mode-card" id="mode-report" onclick="selectMode('report')">
+          <div style="font-size:2rem;margin-bottom:0.5rem;">📊</div>
+          <div style="font-weight:700;font-size:1rem;margin-bottom:0.3rem;">Reporte Ceibal</div>
+          <div style="color:var(--text-dim);font-size:0.8rem;">Generar planilla de anualidades para subir al sistema de Ceibal</div>
+        </div>
+        <div class="mode-card" id="mode-lists" onclick="selectMode('lists')">
+          <div style="font-size:2rem;margin-bottom:0.5rem;">📋</div>
+          <div style="font-weight:700;font-size:1rem;margin-bottom:0.3rem;">Lista de cédulas por grupo</div>
+          <div style="color:var(--text-dim);font-size:0.8rem;">Generar PDFs y Excel con las cédulas separadas por cada grupo/curso</div>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;gap:0.8rem;margin-top:1rem;">
+      <button class="btn btn-outline" id="btn-back-mode">← Volver</button>
+    </div>
+  </div>
+
+  <!-- Step Lists: Generate group lists -->
+  <div id="step-lists" class="hidden">
+    <div class="card">
+      <div class="card-title"><span class="icon">🏫</span> Datos del centro</div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Nombre del centro educativo</label>
+          <input type="text" id="school-name-lists" placeholder="Ej: Colegio Hans Christian Andersen">
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="icon">📋</span> Grupos detectados</div>
+      <div id="group-preview-lists" style="margin-bottom:1rem;"></div>
+      <div style="display:flex;gap:0.8rem;flex-wrap:wrap;">
+        <button class="btn btn-primary" id="btn-pdf-groups">📄 Descargar PDFs por grupo</button>
+        <button class="btn btn-outline" id="btn-excel-groups">📊 Descargar Excel por grupo</button>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:0.8rem;margin-top:1rem;">
+      <button class="btn btn-outline" id="btn-back-lists">← Volver</button>
+    </div>
+  </div>
+
+  <!-- Step 2: Configure (Report mode) -->
   <div id="step2" class="hidden">
     <div class="card">
       <div class="card-title"><span class="icon">💰</span> Anualidad base</div>
@@ -586,18 +651,6 @@
           <tbody id="table-body"></tbody>
         </table>
       </div>
-    </div>
-
-    <div class="card" style="margin-top:1rem;">
-      <div class="card-title"><span class="icon">📋</span> Listas por grupo</div>
-      <p style="color:var(--text-dim);font-size:0.82rem;margin-bottom:0.8rem;">
-        Generá PDFs y Excel con las cédulas separadas por grupo (curso). Cada archivo incluye el nombre del centro educativo como subtítulo.
-      </p>
-      <div style="display:flex;gap:0.8rem;flex-wrap:wrap;">
-        <button class="btn btn-primary" id="btn-pdf-groups">📄 Descargar PDFs por grupo</button>
-        <button class="btn btn-outline" id="btn-excel-groups">📊 Descargar Excel por grupo</button>
-      </div>
-      <div id="group-preview" style="margin-top:0.8rem;"></div>
     </div>
 
     <div style="display:flex;gap:0.8rem;margin-top:1rem;flex-wrap:wrap;">
@@ -1107,22 +1160,107 @@ function updateNextBtn() {
 });
 
 // ===== Navigation =====
-function showStep(n) {
-  ['step1','step2','step3'].forEach((id, i) => {
-    document.getElementById(id).classList.toggle('hidden', i !== n-1);
-    const ind = document.getElementById(`step${i+1}-ind`);
-    ind.classList.remove('active', 'done');
-    if (i < n-1) ind.classList.add('done');
-    if (i === n-1) ind.classList.add('active');
+let appMode = null; // 'report' or 'lists'
+
+const ALL_STEPS = ['step1', 'step-mode', 'step-lists', 'step2', 'step3'];
+const ALL_INDS = ['step1-ind', 'step-mode-ind', 'step2-ind', 'step3-ind'];
+
+function showStepById(stepId) {
+  ALL_STEPS.forEach(id => {
+    document.getElementById(id).classList.toggle('hidden', id !== stepId);
   });
+
+  // Determine progress for indicators
+  const reportFlow = ['step1', 'step-mode', 'step2', 'step3'];
+  const listsFlow = ['step1', 'step-mode', 'step-lists'];
+
+  const flow = appMode === 'lists' ? listsFlow : reportFlow;
+  const currentIdx = flow.indexOf(stepId);
+
+  ALL_INDS.forEach(indId => {
+    const el = document.getElementById(indId);
+    el.classList.remove('active', 'done');
+  });
+
+  // Map step IDs to indicator IDs
+  const stepToInd = {
+    'step1': 'step1-ind',
+    'step-mode': 'step-mode-ind',
+    'step-lists': 'step2-ind',
+    'step2': 'step2-ind',
+    'step3': 'step3-ind'
+  };
+
+  flow.forEach((sid, i) => {
+    const indId = stepToInd[sid];
+    if (!indId) return;
+    const el = document.getElementById(indId);
+    if (i < currentIdx) el.classList.add('done');
+    if (i === currentIdx) el.classList.add('active');
+  });
+
+  // Hide step3/step4 indicators in lists mode
+  if (appMode === 'lists') {
+    document.getElementById('step3-ind').style.display = 'none';
+  } else {
+    document.getElementById('step3-ind').style.display = '';
+  }
 }
 
-document.getElementById('btn-next1').addEventListener('click', () => showStep(2));
-document.getElementById('btn-back2').addEventListener('click', () => showStep(1));
+function selectMode(mode) {
+  appMode = mode;
+  document.getElementById('mode-report').classList.toggle('selected', mode === 'report');
+  document.getElementById('mode-lists').classList.toggle('selected', mode === 'lists');
+
+  if (mode === 'report') {
+    showStepById('step2');
+  } else {
+    renderGroupListsStep();
+    showStepById('step-lists');
+  }
+}
+
+function renderGroupListsStep() {
+  // Populate groups for the lists step
+  const groups = getStudentGroupsAll();
+  const groupKeys = Object.keys(groups);
+  const gpEl = document.getElementById('group-preview-lists');
+  if (groupKeys.length > 0) {
+    gpEl.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:0.4rem;">
+      ${groupKeys.map(g => `<span class="count-badge" style="background:var(--accent-glow);color:var(--accent)">${g} (${groups[g].length})</span>`).join('')}
+    </div>`;
+  } else {
+    gpEl.innerHTML = '<span style="color:var(--text-dim);font-size:0.8rem;">No hay grupos detectados</span>';
+  }
+}
+
+// Step 1 → Mode selection
+document.getElementById('btn-next1').addEventListener('click', () => {
+  showStepById('step-mode');
+});
+
+// Mode → back to Step 1
+document.getElementById('btn-back-mode').addEventListener('click', () => {
+  appMode = null;
+  showStepById('step1');
+});
+
+// Lists → back to Mode
+document.getElementById('btn-back-lists').addEventListener('click', () => {
+  appMode = null;
+  showStepById('step-mode');
+});
+
+// Step 2 (report) → back to Mode
+document.getElementById('btn-back2').addEventListener('click', () => {
+  appMode = null;
+  showStepById('step-mode');
+});
+
+// Step 2 → Step 3 (report flow)
 document.getElementById('btn-next2').addEventListener('click', () => {
   anualidadBase = parseFloat(document.getElementById('anualidad-base').value) || 0;
   schoolName = document.getElementById('school-name').value.trim();
-  // Apply anualidad base to all students that don't have custom discount
   allRecords.forEach(r => {
     if (r.relacion === 'ESTUDIANTE') {
       if (r.descuento === null) {
@@ -1132,9 +1270,13 @@ document.getElementById('btn-next2').addEventListener('click', () => {
     }
   });
   renderStep3();
-  showStep(3);
+  showStepById('step3');
 });
-document.getElementById('btn-back3').addEventListener('click', () => showStep(2));
+
+// Step 3 → back to Step 2
+document.getElementById('btn-back3').addEventListener('click', () => {
+  showStepById('step2');
+});
 
 function updateStep2Btn() {
   const hasAnualidad = !!document.getElementById('anualidad-base').value;
@@ -1235,18 +1377,6 @@ function renderStep3() {
     dlBtn.title = `Necesitás al menos ${MIN_ROWS_PER_FILE} registros. Faltan ${faltan}.`;
   } else {
     dlBtn.title = '';
-  }
-
-  // Update group preview
-  const groups = getStudentGroups();
-  const groupKeys = Object.keys(groups);
-  const gpEl = document.getElementById('group-preview');
-  if (groupKeys.length > 0) {
-    gpEl.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:0.4rem;margin-top:0.5rem;">
-      ${groupKeys.map(g => `<span class="count-badge" style="background:var(--accent-glow);color:var(--accent)">${g} (${groups[g].length})</span>`).join('')}
-    </div>`;
-  } else {
-    gpEl.innerHTML = '<span style="color:var(--text-dim);font-size:0.8rem;">No hay grupos detectados</span>';
   }
 
   renderTable();
@@ -1641,16 +1771,13 @@ document.getElementById('btn-save-progress').addEventListener('click', () => {
   XLSX.writeFile(wb, 'progreso_planilla.xlsx', { bookType: 'xlsx' });
 });
 
-// ===== Group students by curso =====
-function getStudentGroups() {
+// ===== Group students by curso (all students, for lists mode) =====
+function getStudentGroupsAll() {
   const groups = {};
-  allRecords.forEach((r, i) => {
+  allRecords.forEach(r => {
     if (r.relacion !== 'ESTUDIANTE') return;
-    if (disabledRecords.has(i)) return;
-    if (r.ciclo && !activeCiclos.has(r.ciclo)) return;
-    if (r.grado && !activeGrados.has(r.grado)) return;
-
     const grupo = r.cursoOriginal || `${r.ciclo} ${r.grado}`;
+    if (!grupo.trim()) return;
     if (!groups[grupo]) groups[grupo] = [];
     groups[grupo].push(r);
   });
@@ -1667,15 +1794,19 @@ function getStudentGroups() {
 
 // ===== PDF per group =====
 document.getElementById('btn-pdf-groups').addEventListener('click', () => {
-  const groups = getStudentGroups();
+  const groups = getStudentGroupsAll();
   const groupKeys = Object.keys(groups);
 
   if (groupKeys.length === 0) {
-    alert('No hay grupos de estudiantes activos para generar PDFs.');
+    alert('No hay grupos de estudiantes para generar PDFs.');
     return;
   }
 
-  const nombre = schoolName || 'Centro Educativo';
+  const nombre = document.getElementById('school-name-lists').value.trim();
+  if (!nombre) {
+    alert('Ingresá el nombre del centro educativo antes de generar los PDFs.');
+    return;
+  }
 
   alert(`Se van a descargar ${groupKeys.length} PDFs, uno por cada grupo.`);
 
@@ -1698,15 +1829,10 @@ document.getElementById('btn-pdf-groups').addEventListener('click', () => {
     doc.setDrawColor(100, 100, 100);
     doc.line(20, 32, 190, 32);
 
-    // Column header
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'bold');
-    doc.text('Cedulas', 20, 40);
-
     // List of CIs, one per line
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(11);
-    let y = 48;
+    let y = 40;
     const pageHeight = 280;
 
     students.forEach(s => {
@@ -1731,7 +1857,6 @@ document.getElementById('btn-pdf-groups').addEventListener('click', () => {
     doc.setFontSize(10);
     doc.text(`Total: ${students.length} estudiantes`, 20, y);
 
-    // Download with delay
     setTimeout(() => {
       doc.save(`cedulas_grupo_${grupo.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`);
     }, idx * 500);
@@ -1740,35 +1865,23 @@ document.getElementById('btn-pdf-groups').addEventListener('click', () => {
 
 // ===== Excel per group =====
 document.getElementById('btn-excel-groups').addEventListener('click', () => {
-  const groups = getStudentGroups();
+  const groups = getStudentGroupsAll();
   const groupKeys = Object.keys(groups);
 
   if (groupKeys.length === 0) {
-    alert('No hay grupos de estudiantes activos para generar Excel.');
+    alert('No hay grupos de estudiantes para generar Excel.');
     return;
   }
 
   alert(`Se van a descargar ${groupKeys.length} archivos Excel, uno por cada grupo.`);
 
   groupKeys.forEach((grupo, idx) => {
-    const students = groups[grupo];
-    const nombre = schoolName || 'Centro Educativo';
-
-    const headers = ['NOMBRE Y APELLIDO', 'CEDULA'];
-    const rows = students.map(s => [
+    const rows = groups[grupo].map(s => [
       `${s.primerNombre} ${s.primerApellido}`,
       s.ci
     ]);
 
-    const data = [
-      [`Lista de cedulas por grupo - ${grupo}`],
-      [nombre],
-      [],
-      headers,
-      ...rows
-    ];
-
-    const ws = XLSX.utils.aoa_to_sheet(data);
+    const ws = XLSX.utils.aoa_to_sheet(rows);
     ws['!cols'] = [{ wch: 30 }, { wch: 15 }];
 
     const wb = XLSX.utils.book_new();
