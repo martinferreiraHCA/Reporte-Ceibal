@@ -444,6 +444,69 @@
   }
   .mode-card:hover { border-color: var(--accent); background: var(--accent-glow); }
   .mode-card.selected { border-color: var(--accent); background: var(--accent-glow); }
+
+  /* Bulk modal wide */
+  .modal-wide {
+    max-width: 720px;
+  }
+  .modal-wide textarea {
+    width: 100%; min-height: 180px; padding: 0.7rem;
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 8px; color: var(--text); font-family: 'DM Sans', monospace;
+    font-size: 0.82rem; resize: vertical;
+  }
+  .modal-wide textarea:focus {
+    outline: none; border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+  }
+  .bulk-result-item {
+    display: flex; align-items: center; gap: 0.6rem;
+    padding: 0.5rem 0.7rem; border-bottom: 1px solid var(--border);
+    font-size: 0.82rem;
+  }
+  .bulk-result-item:last-child { border-bottom: none; }
+  .bulk-match { color: var(--green); font-weight: 600; }
+  .bulk-suggest { color: var(--orange); }
+  .bulk-nomatch { color: var(--red); }
+  .bulk-result-list {
+    max-height: 350px; overflow-y: auto;
+    border: 1px solid var(--border); border-radius: 8px;
+    margin: 0.8rem 0;
+  }
+  .bulk-select {
+    padding: 0.25rem 0.4rem; background: var(--surface2);
+    border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); font-family: inherit; font-size: 0.78rem;
+  }
+  .bulk-discount-badge {
+    display: inline-flex; padding: 0.1rem 0.5rem;
+    border-radius: 99px; font-size: 0.72rem; font-weight: 600;
+    background: var(--accent-glow); color: var(--accent);
+  }
+
+  /* Validation panel */
+  .validation-panel {
+    border: 1px solid var(--border); border-radius: var(--radius);
+    margin-bottom: 1rem; overflow: hidden;
+  }
+  .validation-header {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.7rem 1rem; cursor: pointer;
+    background: var(--surface2); font-size: 0.85rem; font-weight: 600;
+    transition: all 0.2s;
+  }
+  .validation-header:hover { background: var(--surface); }
+  .validation-body { padding: 0.8rem 1rem; }
+  .validation-item {
+    display: flex; align-items: flex-start; gap: 0.5rem;
+    padding: 0.4rem 0; font-size: 0.8rem;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+  }
+  .validation-item:last-child { border-bottom: none; }
+  .val-icon { flex-shrink: 0; }
+  .val-warn { color: var(--orange); }
+  .val-error { color: var(--red); }
+  .val-ok { color: var(--green); }
 </style>
 </head>
 <body>
@@ -603,6 +666,16 @@
       <div class="limit-progress"><div class="limit-fill" id="limit-fill" style="width:0%"></div></div>
     </div>
 
+    <!-- Validation panel -->
+    <div class="validation-panel" id="validation-panel" style="display:none;">
+      <div class="validation-header" onclick="toggleValidation()">
+        <span id="validation-icon">⚠</span>
+        <span id="validation-title">Validación de datos</span>
+        <span style="margin-left:auto;font-size:0.7rem;color:var(--text-dim);" id="validation-toggle-hint">clic para expandir</span>
+      </div>
+      <div class="validation-body hidden" id="validation-body"></div>
+    </div>
+
     <div class="card" style="padding:1rem;">
       <div class="action-bar">
         <div class="search-bar" style="flex:1;margin-bottom:0;">
@@ -615,6 +688,7 @@
           <option value="DOCENTE">Docentes</option>
         </select>
         <button class="toggle-filters-btn" id="btn-toggle-filters">☰ Filtros por casilla</button>
+        <button class="toggle-filters-btn" onclick="openBulkModal()">📋 Carga masiva descuentos</button>
         <span class="count-badge" id="count-badge">0 registros</span>
       </div>
 
@@ -657,6 +731,42 @@
       <button class="btn btn-outline" id="btn-back3">← Volver</button>
       <button class="btn btn-success" id="btn-download">⬇ Descargar Planilla .xls</button>
       <button class="btn btn-primary" id="btn-save-progress">💾 Guardar progreso completo</button>
+    </div>
+  </div>
+</div>
+
+<!-- Bulk Discount Modal -->
+<div class="modal-overlay" id="bulk-modal">
+  <div class="modal modal-wide">
+    <button class="close-btn" onclick="closeBulkModal()">✕</button>
+    <h3>Carga masiva de descuentos</h3>
+    <p style="color:var(--text-dim);font-size:0.8rem;margin-bottom:0.8rem;">
+      Pegá la lista de estudiantes con sus descuentos. Formatos aceptados:<br>
+      <code style="color:var(--accent)">Nombre Apellido 50%</code> — porcentaje de descuento<br>
+      <code style="color:var(--accent)">Nombre Apellido $ 179800</code> — monto fijo de anualidad<br>
+      <code style="color:var(--accent)">Nombre Apellido 100%</code> — beca total<br>
+      <code style="color:var(--accent)">Nombre Apellido</code> — sin descuento (se omite)
+    </p>
+    <div id="bulk-step-input">
+      <textarea id="bulk-textarea" placeholder="Liah Marcano 50%
+Renata Ribeiro 50%
+Francisco Senturion anualidad $ 179800
+Emilia Delgado 100%"></textarea>
+      <div style="display:flex;gap:0.5rem;margin-top:0.8rem;">
+        <button class="btn btn-primary" onclick="processBulkDiscounts()">Procesar lista</button>
+        <button class="btn btn-outline" onclick="closeBulkModal()">Cancelar</button>
+      </div>
+    </div>
+    <div id="bulk-step-results" class="hidden">
+      <div style="display:flex;gap:0.8rem;align-items:center;margin-bottom:0.5rem;">
+        <span id="bulk-stats" style="font-size:0.82rem;color:var(--text-dim);"></span>
+      </div>
+      <div class="bulk-result-list" id="bulk-result-list"></div>
+      <div style="display:flex;gap:0.5rem;margin-top:0.8rem;">
+        <button class="btn btn-success" onclick="applyBulkDiscounts()">Aplicar descuentos</button>
+        <button class="btn btn-outline" onclick="backToBulkInput()">Volver a editar</button>
+        <button class="btn btn-outline" onclick="closeBulkModal()">Cancelar</button>
+      </div>
     </div>
   </div>
 </div>
@@ -1385,6 +1495,7 @@ function renderStep3() {
   }
 
   renderTable();
+  renderValidation();
 }
 
 function toggleCiclo(cb) {
@@ -1914,6 +2025,370 @@ document.getElementById('btn-excel-groups').addEventListener('click', () => {
     }, idx * 500);
   });
 });
+
+// ===== Bulk Discount Assignment =====
+let bulkParsedEntries = [];
+
+function openBulkModal() {
+  document.getElementById('bulk-modal').classList.add('show');
+  document.getElementById('bulk-step-input').classList.remove('hidden');
+  document.getElementById('bulk-step-results').classList.add('hidden');
+  document.getElementById('bulk-textarea').value = '';
+  bulkParsedEntries = [];
+}
+
+function closeBulkModal() {
+  document.getElementById('bulk-modal').classList.remove('show');
+  bulkParsedEntries = [];
+}
+
+function backToBulkInput() {
+  document.getElementById('bulk-step-input').classList.remove('hidden');
+  document.getElementById('bulk-step-results').classList.add('hidden');
+}
+
+// Normalize string for comparison: lowercase, remove accents, remove extra spaces
+function normalizeStr(s) {
+  return s.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().replace(/[''´`]/g, "'").replace(/\s+/g, ' ').trim();
+}
+
+// Similarity score between two strings (0-1), based on word overlap + Levenshtein
+function nameSimilarity(a, b) {
+  const na = normalizeStr(a);
+  const nb = normalizeStr(b);
+  if (na === nb) return 1;
+
+  // Word-level overlap
+  const wordsA = na.split(/\s+/);
+  const wordsB = nb.split(/\s+/);
+
+  let matchedWords = 0;
+  const usedB = new Set();
+  for (const wa of wordsA) {
+    let bestScore = 0;
+    let bestIdx = -1;
+    for (let i = 0; i < wordsB.length; i++) {
+      if (usedB.has(i)) continue;
+      const score = wordSimilarity(wa, wordsB[i]);
+      if (score > bestScore) { bestScore = score; bestIdx = i; }
+    }
+    if (bestScore >= 0.7 && bestIdx >= 0) {
+      matchedWords += bestScore;
+      usedB.add(bestIdx);
+    }
+  }
+
+  const maxWords = Math.max(wordsA.length, wordsB.length);
+  return matchedWords / maxWords;
+}
+
+// Levenshtein-based word similarity
+function wordSimilarity(a, b) {
+  if (a === b) return 1;
+  const maxLen = Math.max(a.length, b.length);
+  if (maxLen === 0) return 1;
+  return 1 - levenshtein(a, b) / maxLen;
+}
+
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i-1] === b[j-1]
+        ? dp[i-1][j-1]
+        : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
+    }
+  }
+  return dp[m][n];
+}
+
+function parseBulkLine(line) {
+  line = line.trim();
+  if (!line) return null;
+
+  // Try: Name ... anualidad $ XXXX or Name ... $ XXXX
+  const amountMatch = line.match(/^(.+?)\s+(?:anualidad\s+)?\$\s*([\d.,]+)\s*\.?$/i);
+  if (amountMatch) {
+    const val = parseFloat(amountMatch[2].replace(/\./g, '').replace(',', '.'));
+    return { name: amountMatch[1].trim(), type: 'amount', value: val };
+  }
+
+  // Try: Name ... XX%
+  const pctMatch = line.match(/^(.+?)\s+(\d+)\s*%\s*$/);
+  if (pctMatch) {
+    return { name: pctMatch[1].trim(), type: 'percent', value: parseInt(pctMatch[2]) };
+  }
+
+  // Just a name — no discount info
+  return { name: line.trim(), type: 'none', value: null };
+}
+
+function processBulkDiscounts() {
+  const text = document.getElementById('bulk-textarea').value;
+  const lines = text.split('\n').filter(l => l.trim());
+
+  if (lines.length === 0) {
+    alert('Pegá al menos una línea con nombre y descuento.');
+    return;
+  }
+
+  // Parse each line
+  const entries = lines.map(parseBulkLine).filter(Boolean);
+
+  // Get only students
+  const students = allRecords
+    .map((r, i) => ({ ...r, _idx: i }))
+    .filter(r => r.relacion === 'ESTUDIANTE');
+
+  // Match each entry to a student
+  bulkParsedEntries = entries.map(entry => {
+    const fullName = entry.name;
+    let bestMatch = null;
+    let bestScore = 0;
+    let suggestions = [];
+
+    for (const s of students) {
+      const recordName = `${s.primerNombre} ${s.primerApellido}`;
+      const score = nameSimilarity(fullName, recordName);
+      if (score > bestScore) {
+        bestScore = score;
+        bestMatch = s;
+      }
+      if (score >= 0.45) {
+        suggestions.push({ student: s, score, name: recordName });
+      }
+    }
+
+    suggestions.sort((a, b) => b.score - a.score);
+    suggestions = suggestions.slice(0, 5);
+
+    return {
+      ...entry,
+      matchIdx: bestScore >= 0.7 ? bestMatch._idx : null,
+      matchName: bestScore >= 0.7 ? `${bestMatch.primerNombre} ${bestMatch.primerApellido}` : null,
+      matchScore: bestScore,
+      suggestions: suggestions,
+      selectedIdx: bestScore >= 0.7 ? bestMatch._idx : (suggestions.length > 0 ? suggestions[0].student._idx : null)
+    };
+  });
+
+  // Render results
+  renderBulkResults();
+}
+
+function renderBulkResults() {
+  const list = document.getElementById('bulk-result-list');
+  const exact = bulkParsedEntries.filter(e => e.matchIdx !== null).length;
+  const suggest = bulkParsedEntries.filter(e => e.matchIdx === null && e.suggestions.length > 0).length;
+  const noMatch = bulkParsedEntries.filter(e => e.matchIdx === null && e.suggestions.length === 0).length;
+  const withDiscount = bulkParsedEntries.filter(e => e.type !== 'none').length;
+
+  document.getElementById('bulk-stats').innerHTML =
+    `<span class="bulk-match">${exact} coincidencias exactas</span> · ` +
+    `<span class="bulk-suggest">${suggest} sugerencias</span> · ` +
+    `<span class="bulk-nomatch">${noMatch} sin coincidencia</span> · ` +
+    `${withDiscount} con descuento`;
+
+  list.innerHTML = bulkParsedEntries.map((entry, idx) => {
+    const discountLabel = entry.type === 'percent'
+      ? `<span class="bulk-discount-badge">${entry.value}%</span>`
+      : entry.type === 'amount'
+      ? `<span class="bulk-discount-badge">$${entry.value.toLocaleString('es-UY')}</span>`
+      : '<span style="color:var(--text-dim);font-size:0.72rem;">sin descuento</span>';
+
+    const isExact = entry.matchIdx !== null;
+    const hasSuggestions = entry.suggestions.length > 0;
+
+    let matchHtml;
+    if (isExact) {
+      matchHtml = `<span class="bulk-match">✓ ${entry.matchName}</span>`;
+    } else if (hasSuggestions) {
+      const options = entry.suggestions.map(s =>
+        `<option value="${s.student._idx}" ${s.student._idx === entry.selectedIdx ? 'selected' : ''}>${s.name} (${Math.round(s.score * 100)}%)</option>`
+      ).join('');
+      matchHtml = `<select class="bulk-select" onchange="bulkSelectMatch(${idx}, this.value)">
+        <option value="-1">-- Ignorar --</option>
+        ${options}
+      </select>`;
+    } else {
+      matchHtml = `<span class="bulk-nomatch">✕ Sin coincidencia</span>`;
+    }
+
+    const statusIcon = isExact ? '🟢' : hasSuggestions ? '🟡' : '🔴';
+
+    return `<div class="bulk-result-item">
+      <span>${statusIcon}</span>
+      <span style="flex:1;font-weight:500;">${entry.name}</span>
+      ${discountLabel}
+      <span style="color:var(--text-dim);">→</span>
+      ${matchHtml}
+    </div>`;
+  }).join('');
+
+  document.getElementById('bulk-step-input').classList.add('hidden');
+  document.getElementById('bulk-step-results').classList.remove('hidden');
+}
+
+function bulkSelectMatch(entryIdx, recordIdx) {
+  bulkParsedEntries[entryIdx].selectedIdx = parseInt(recordIdx);
+}
+
+function applyBulkDiscounts() {
+  let applied = 0;
+  let skipped = 0;
+
+  bulkParsedEntries.forEach(entry => {
+    if (entry.type === 'none') { skipped++; return; }
+
+    const idx = entry.matchIdx !== null ? entry.matchIdx : entry.selectedIdx;
+    if (idx === null || idx === -1 || idx === undefined) { skipped++; return; }
+
+    const r = allRecords[idx];
+    if (!r || r.relacion !== 'ESTUDIANTE') { skipped++; return; }
+
+    if (entry.type === 'percent') {
+      const discounted = Math.round(anualidadBase * (1 - entry.value / 100));
+      r.anualidad = discounted;
+      r.becaTotal = discounted === 0 ? 'SI' : 'NO';
+      r.descuento = { type: 'percent', value: entry.value };
+    } else if (entry.type === 'amount') {
+      r.anualidad = entry.value;
+      r.becaTotal = entry.value === 0 ? 'SI' : 'NO';
+      r.descuento = { type: 'amount', value: entry.value };
+    }
+    applied++;
+  });
+
+  closeBulkModal();
+  renderStep3();
+  alert(`Descuentos aplicados: ${applied}\nOmitidos: ${skipped}`);
+}
+
+// Close bulk modal on overlay click
+document.getElementById('bulk-modal').addEventListener('click', (e) => {
+  if (e.target === document.getElementById('bulk-modal')) closeBulkModal();
+});
+
+// ===== Data Validation =====
+let validationOpen = false;
+
+function toggleValidation() {
+  validationOpen = !validationOpen;
+  document.getElementById('validation-body').classList.toggle('hidden', !validationOpen);
+  document.getElementById('validation-toggle-hint').textContent = validationOpen ? 'clic para colapsar' : 'clic para expandir';
+}
+
+function runValidation() {
+  const issues = [];
+  const specialCharRegex = /[áéíóúÁÉÍÓÚñÑüÜ''´`çÇ]/;
+  const validCiRegex = /^\d{6,8}$/;
+  const validDateRegex = /^\d{2}\/\d{2}\/\d{4}$/;
+
+  allRecords.forEach((r, i) => {
+    if (disabledRecords.has(i)) return;
+    const label = `#${i+1} ${r.primerNombre} ${r.primerApellido}`;
+
+    // Missing CI
+    if (!r.ci || r.ci.trim() === '') {
+      issues.push({ type: 'error', msg: `${label}: falta número de CI`, idx: i });
+    } else if (!validCiRegex.test(r.ci)) {
+      issues.push({ type: 'warn', msg: `${label}: CI con formato inusual "${r.ci}" (se esperan 6-8 dígitos)`, idx: i });
+    }
+
+    // Missing date
+    if (r.relacion === 'ESTUDIANTE') {
+      if (!r.fechaNac || r.fechaNac.trim() === '') {
+        issues.push({ type: 'error', msg: `${label}: falta fecha de nacimiento`, idx: i });
+      } else if (!validDateRegex.test(r.fechaNac)) {
+        issues.push({ type: 'warn', msg: `${label}: fecha con formato inusual "${r.fechaNac}" (se espera dd/mm/aaaa)`, idx: i });
+      }
+    }
+
+    // Missing name
+    if (!r.primerNombre || r.primerNombre.trim() === '') {
+      issues.push({ type: 'error', msg: `${label}: falta primer nombre`, idx: i });
+    }
+    if (!r.primerApellido || r.primerApellido.trim() === '') {
+      issues.push({ type: 'error', msg: `${label}: falta primer apellido`, idx: i });
+    }
+
+    // Special characters in name (Ceibal is sensitive)
+    if (specialCharRegex.test(r.primerNombre)) {
+      issues.push({ type: 'warn', msg: `${label}: nombre contiene caracteres especiales "${r.primerNombre}"`, idx: i });
+    }
+    if (specialCharRegex.test(r.primerApellido)) {
+      issues.push({ type: 'warn', msg: `${label}: apellido contiene caracteres especiales "${r.primerApellido}"`, idx: i });
+    }
+
+    // Missing ciclo or grado
+    if (!r.ciclo || r.ciclo.trim() === '') {
+      issues.push({ type: 'warn', msg: `${label}: falta ciclo educativo`, idx: i });
+    }
+    if (!r.grado || r.grado.trim() === '') {
+      issues.push({ type: 'warn', msg: `${label}: falta grado`, idx: i });
+    }
+
+    // Anualidad check for students
+    if (r.relacion === 'ESTUDIANTE') {
+      if (r.anualidad === 0 && r.becaTotal !== 'SI') {
+        issues.push({ type: 'warn', msg: `${label}: anualidad $0 pero no está marcado como beca total`, idx: i });
+      }
+    }
+  });
+
+  // Duplicate CIs
+  const ciCount = {};
+  allRecords.forEach((r, i) => {
+    if (disabledRecords.has(i)) return;
+    if (r.ci) {
+      if (!ciCount[r.ci]) ciCount[r.ci] = [];
+      ciCount[r.ci].push(i);
+    }
+  });
+  Object.entries(ciCount).forEach(([ci, indices]) => {
+    if (indices.length > 1) {
+      const names = indices.map(i => `${allRecords[i].primerNombre} ${allRecords[i].primerApellido}`).join(', ');
+      issues.push({ type: 'warn', msg: `CI duplicada ${ci}: ${names}` });
+    }
+  });
+
+  return issues;
+}
+
+function renderValidation() {
+  const issues = runValidation();
+  const panel = document.getElementById('validation-panel');
+  const body = document.getElementById('validation-body');
+  const icon = document.getElementById('validation-icon');
+  const title = document.getElementById('validation-title');
+
+  const errors = issues.filter(i => i.type === 'error');
+  const warns = issues.filter(i => i.type === 'warn');
+
+  if (issues.length === 0) {
+    panel.style.display = 'block';
+    icon.textContent = '✅';
+    title.innerHTML = `Validación de datos — <span class="val-ok">Todo correcto</span>`;
+    body.innerHTML = '<p style="color:var(--green);font-size:0.82rem;">No se encontraron problemas en los datos.</p>';
+  } else {
+    panel.style.display = 'block';
+    icon.textContent = errors.length > 0 ? '🔴' : '⚠';
+    title.innerHTML = `Validación de datos — <span class="${errors.length > 0 ? 'val-error' : 'val-warn'}">${errors.length} errores, ${warns.length} advertencias</span>`;
+
+    body.innerHTML = issues.map(issue => {
+      const cls = issue.type === 'error' ? 'val-error' : 'val-warn';
+      const ico = issue.type === 'error' ? '✕' : '⚠';
+      return `<div class="validation-item">
+        <span class="val-icon ${cls}">${ico}</span>
+        <span class="${cls}">${issue.msg}</span>
+      </div>`;
+    }).join('');
+  }
+}
 </script>
 
 </body>
