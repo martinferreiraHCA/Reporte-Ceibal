@@ -1772,19 +1772,35 @@ document.getElementById('btn-save-progress').addEventListener('click', () => {
 });
 
 // ===== Group students by curso (all students, for lists mode) =====
+function parseGrupoLabel(cursoOriginal) {
+  if (!cursoOriginal) return null;
+  // Pattern: "7-1-EBI" → curso=7, grupo=1 → "7°1"
+  const m = cursoOriginal.trim().match(/^(\d+)-(\d+)/);
+  if (m) return `${m[1]}°${m[2]}`;
+  return null;
+}
+
 function getStudentGroupsAll() {
   const groups = {};
   allRecords.forEach(r => {
     if (r.relacion !== 'ESTUDIANTE') return;
-    const grupo = r.cursoOriginal || `${r.ciclo} ${r.grado}`;
-    if (!grupo.trim()) return;
-    if (!groups[grupo]) groups[grupo] = [];
-    groups[grupo].push(r);
+    // Parse curso and grupo from cursoOriginal for human-readable label
+    const label = parseGrupoLabel(r.cursoOriginal) || r.cursoOriginal || `${r.ciclo} ${r.grado}`;
+    if (!label.trim()) return;
+    if (!groups[label]) groups[label] = [];
+    groups[label].push(r);
   });
-  // Sort groups naturally
+  // Sort groups: by curso number first, then grupo number
   const sorted = Object.keys(groups).sort((a, b) => {
-    const na = parseInt(a), nb = parseInt(b);
-    if (!isNaN(na) && !isNaN(nb)) return na - nb;
+    const ma = a.match(/^(\d+)°(\d+)$/);
+    const mb = b.match(/^(\d+)°(\d+)$/);
+    if (ma && mb) {
+      const diff = parseInt(ma[1]) - parseInt(mb[1]);
+      if (diff !== 0) return diff;
+      return parseInt(ma[2]) - parseInt(mb[2]);
+    }
+    if (ma) return -1;
+    if (mb) return 1;
     return a.localeCompare(b);
   });
   const result = {};
