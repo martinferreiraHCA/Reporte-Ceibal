@@ -6,6 +6,7 @@
 <title>Generador de Planilla — Hans Christian Andersen</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
   :root {
     --bg: #0f1117;
@@ -511,6 +512,12 @@
       </p>
       <div class="form-row">
         <div class="form-group">
+          <label>Nombre del centro educativo</label>
+          <input type="text" id="school-name" placeholder="Ej: Colegio Hans Christian Andersen">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
           <label>Anualidad base ($U)</label>
           <input type="number" id="anualidad-base" placeholder="Ej: 120000" min="0">
         </div>
@@ -581,6 +588,18 @@
       </div>
     </div>
 
+    <div class="card" style="margin-top:1rem;">
+      <div class="card-title"><span class="icon">📋</span> Listas por grupo</div>
+      <p style="color:var(--text-dim);font-size:0.82rem;margin-bottom:0.8rem;">
+        Generá PDFs y Excel con las cédulas separadas por grupo (curso). Cada archivo incluye el nombre del centro educativo como subtítulo.
+      </p>
+      <div style="display:flex;gap:0.8rem;flex-wrap:wrap;">
+        <button class="btn btn-primary" id="btn-pdf-groups">📄 Descargar PDFs por grupo</button>
+        <button class="btn btn-outline" id="btn-excel-groups">📊 Descargar Excel por grupo</button>
+      </div>
+      <div id="group-preview" style="margin-top:0.8rem;"></div>
+    </div>
+
     <div style="display:flex;gap:0.8rem;margin-top:1rem;flex-wrap:wrap;">
       <button class="btn btn-outline" id="btn-back3">← Volver</button>
       <button class="btn btn-success" id="btn-download">⬇ Descargar Planilla .xls</button>
@@ -627,6 +646,7 @@ let disabledRecords = new Set(); // indices of disabled records
 let activeCiclos = new Set();    // checked ciclos
 let activeGrados = new Set();    // checked grados
 let filtersVisible = false;
+let schoolName = '';
 
 // ===== Date cleaning utility =====
 // Handles: blank placeholders like '  /  /    ', 2-digit years, and normalizes to dd/mm/aaaa
@@ -892,6 +912,7 @@ document.getElementById('file-progress').addEventListener('change', async (e) =>
       const metaData = XLSX.utils.sheet_to_json(metaWs);
       if (metaData.length > 0) {
         anualidadBase = metaData[0].anualidadBase || 0;
+        schoolName = metaData[0].schoolName || '';
         studentFileType = metaData[0].studentFileType || null;
       }
 
@@ -1057,9 +1078,10 @@ document.getElementById('file-progress').addEventListener('change', async (e) =>
     activeCiclos = new Set();
     activeGrados = new Set();
 
-    // Set anualidad base input and enable step 2 button
+    // Set inputs and enable step 2 button
     document.getElementById('anualidad-base').value = anualidadBase;
-    document.getElementById('btn-next2').disabled = !anualidadBase;
+    document.getElementById('school-name').value = schoolName;
+    updateStep2Btn();
 
     updateNextBtn();
   } catch(err) {
@@ -1099,6 +1121,7 @@ document.getElementById('btn-next1').addEventListener('click', () => showStep(2)
 document.getElementById('btn-back2').addEventListener('click', () => showStep(1));
 document.getElementById('btn-next2').addEventListener('click', () => {
   anualidadBase = parseFloat(document.getElementById('anualidad-base').value) || 0;
+  schoolName = document.getElementById('school-name').value.trim();
   // Apply anualidad base to all students that don't have custom discount
   allRecords.forEach(r => {
     if (r.relacion === 'ESTUDIANTE') {
@@ -1113,9 +1136,13 @@ document.getElementById('btn-next2').addEventListener('click', () => {
 });
 document.getElementById('btn-back3').addEventListener('click', () => showStep(2));
 
-document.getElementById('anualidad-base').addEventListener('input', (e) => {
-  document.getElementById('btn-next2').disabled = !e.target.value;
-});
+function updateStep2Btn() {
+  const hasAnualidad = !!document.getElementById('anualidad-base').value;
+  const hasSchool = !!document.getElementById('school-name').value.trim();
+  document.getElementById('btn-next2').disabled = !(hasAnualidad && hasSchool);
+}
+document.getElementById('anualidad-base').addEventListener('input', updateStep2Btn);
+document.getElementById('school-name').addEventListener('input', updateStep2Btn);
 
 // ===== Step 3: Render table =====
 function renderStep3() {
@@ -1208,6 +1235,18 @@ function renderStep3() {
     dlBtn.title = `Necesitás al menos ${MIN_ROWS_PER_FILE} registros. Faltan ${faltan}.`;
   } else {
     dlBtn.title = '';
+  }
+
+  // Update group preview
+  const groups = getStudentGroups();
+  const groupKeys = Object.keys(groups);
+  const gpEl = document.getElementById('group-preview');
+  if (groupKeys.length > 0) {
+    gpEl.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:0.4rem;margin-top:0.5rem;">
+      ${groupKeys.map(g => `<span class="count-badge" style="background:var(--accent-glow);color:var(--accent)">${g} (${groups[g].length})</span>`).join('')}
+    </div>`;
+  } else {
+    gpEl.innerHTML = '<span style="color:var(--text-dim);font-size:0.8rem;">No hay grupos detectados</span>';
   }
 
   renderTable();
@@ -1589,6 +1628,7 @@ document.getElementById('btn-save-progress').addEventListener('click', () => {
   // Sheet 2: metadata
   const metaSheet = XLSX.utils.json_to_sheet([{
     anualidadBase: anualidadBase,
+    schoolName: schoolName || '',
     studentFileType: studentFileType || '',
     savedAt: new Date().toLocaleString('es-UY'),
     totalRecords: allRecords.length,
@@ -1599,6 +1639,145 @@ document.getElementById('btn-save-progress').addEventListener('click', () => {
   XLSX.utils.book_append_sheet(wb, dataSheet, 'datos');
   XLSX.utils.book_append_sheet(wb, metaSheet, '__meta');
   XLSX.writeFile(wb, 'progreso_planilla.xlsx', { bookType: 'xlsx' });
+});
+
+// ===== Group students by curso =====
+function getStudentGroups() {
+  const groups = {};
+  allRecords.forEach((r, i) => {
+    if (r.relacion !== 'ESTUDIANTE') return;
+    if (disabledRecords.has(i)) return;
+    if (r.ciclo && !activeCiclos.has(r.ciclo)) return;
+    if (r.grado && !activeGrados.has(r.grado)) return;
+
+    const grupo = r.cursoOriginal || `${r.ciclo} ${r.grado}`;
+    if (!groups[grupo]) groups[grupo] = [];
+    groups[grupo].push(r);
+  });
+  // Sort groups naturally
+  const sorted = Object.keys(groups).sort((a, b) => {
+    const na = parseInt(a), nb = parseInt(b);
+    if (!isNaN(na) && !isNaN(nb)) return na - nb;
+    return a.localeCompare(b);
+  });
+  const result = {};
+  sorted.forEach(k => { result[k] = groups[k]; });
+  return result;
+}
+
+// ===== PDF per group =====
+document.getElementById('btn-pdf-groups').addEventListener('click', () => {
+  const groups = getStudentGroups();
+  const groupKeys = Object.keys(groups);
+
+  if (groupKeys.length === 0) {
+    alert('No hay grupos de estudiantes activos para generar PDFs.');
+    return;
+  }
+
+  const nombre = schoolName || 'Centro Educativo';
+
+  alert(`Se van a descargar ${groupKeys.length} PDFs, uno por cada grupo.`);
+
+  groupKeys.forEach((grupo, idx) => {
+    const students = groups[grupo];
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+
+    // Header
+    doc.setFontSize(16);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Lista de cedulas por grupo - ${grupo}`, 105, 20, { align: 'center' });
+
+    // Subtitle: school name
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'normal');
+    doc.text(nombre, 105, 28, { align: 'center' });
+
+    // Separator line
+    doc.setDrawColor(100, 100, 100);
+    doc.line(20, 32, 190, 32);
+
+    // Column header
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Cedulas', 20, 40);
+
+    // List of CIs, one per line
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(11);
+    let y = 48;
+    const pageHeight = 280;
+
+    students.forEach(s => {
+      if (y > pageHeight) {
+        doc.addPage();
+        y = 20;
+      }
+      doc.text(s.ci, 20, y);
+      y += 7;
+    });
+
+    // Footer: total
+    if (y > pageHeight - 15) {
+      doc.addPage();
+      y = 20;
+    }
+    y += 5;
+    doc.setDrawColor(100, 100, 100);
+    doc.line(20, y, 190, y);
+    y += 7;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text(`Total: ${students.length} estudiantes`, 20, y);
+
+    // Download with delay
+    setTimeout(() => {
+      doc.save(`cedulas_grupo_${grupo.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`);
+    }, idx * 500);
+  });
+});
+
+// ===== Excel per group =====
+document.getElementById('btn-excel-groups').addEventListener('click', () => {
+  const groups = getStudentGroups();
+  const groupKeys = Object.keys(groups);
+
+  if (groupKeys.length === 0) {
+    alert('No hay grupos de estudiantes activos para generar Excel.');
+    return;
+  }
+
+  alert(`Se van a descargar ${groupKeys.length} archivos Excel, uno por cada grupo.`);
+
+  groupKeys.forEach((grupo, idx) => {
+    const students = groups[grupo];
+    const nombre = schoolName || 'Centro Educativo';
+
+    const headers = ['NOMBRE Y APELLIDO', 'CEDULA'];
+    const rows = students.map(s => [
+      `${s.primerNombre} ${s.primerApellido}`,
+      s.ci
+    ]);
+
+    const data = [
+      [`Lista de cedulas por grupo - ${grupo}`],
+      [nombre],
+      [],
+      headers,
+      ...rows
+    ];
+
+    const ws = XLSX.utils.aoa_to_sheet(data);
+    ws['!cols'] = [{ wch: 30 }, { wch: 15 }];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, grupo.substring(0, 31));
+
+    setTimeout(() => {
+      XLSX.writeFile(wb, `lista_grupo_${grupo.replace(/[^a-zA-Z0-9]/g, '_')}.xlsx`, { bookType: 'xlsx' });
+    }, idx * 500);
+  });
 });
 </script>
 
