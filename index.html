@@ -798,6 +798,8 @@ function parseStudentFile(wb) {
     if (!curso) continue;
     cursos.add(curso);
 
+    const grupoCol = getVal(2); // Column 2: Grupo (e.g., "1", "2")
+
     const doc = getVal(7).replace(/\D/g, '');
     if (!doc) continue;
 
@@ -818,7 +820,8 @@ function parseStudentFile(wb) {
       anualidad: 0,
       becaTotal: 'NO',
       descuento: null, // null = no discount set
-      cursoOriginal: curso
+      cursoOriginal: curso,
+      grupoNumero: grupoCol // Grupo number from column 2
     });
   }
 
@@ -986,7 +989,8 @@ document.getElementById('file-progress').addEventListener('change', async (e) =>
           becaTotal: row['RELACION'] === 'DOCENTE' ? 'N/A' : String(row['BECA_TOTAL'] || 'NO'),
           descuento: null,
           cursoOriginal: String(row['CURSO_ORIGINAL'] || ''),
-          cargo: String(row['CARGO'] || '')
+          cargo: String(row['CARGO'] || ''),
+          grupoNumero: String(row['GRUPO_NUMERO'] || '')
         };
 
         if (row['DESCUENTO_TIPO'] && row['DESCUENTO_VALOR'] !== undefined && row['DESCUENTO_VALOR'] !== '') {
@@ -1095,7 +1099,8 @@ document.getElementById('file-progress').addEventListener('change', async (e) =>
           becaTotal: becaVal,
           descuento: null,
           cursoOriginal: '',
-          cargo: ''
+          cargo: '',
+          grupoNumero: ''
         };
 
         // If student has a specific anualidad, set it as custom discount
@@ -1728,7 +1733,7 @@ document.getElementById('btn-save-progress').addEventListener('click', () => {
   const dataHeaders = [
     'CI', 'FECHA_NAC', 'PRIMER_NOMBRE', 'PRIMER_APELLIDO',
     'CICLO', 'GRADO', 'RELACION', 'ANUALIDAD', 'BECA_TOTAL',
-    'DESCUENTO_TIPO', 'DESCUENTO_VALOR', 'CURSO_ORIGINAL', 'CARGO', 'ACTIVO'
+    'DESCUENTO_TIPO', 'DESCUENTO_VALOR', 'CURSO_ORIGINAL', 'CARGO', 'ACTIVO', 'GRUPO_NUMERO'
   ];
 
   const dataRows = allRecords.map((r, i) => [
@@ -1745,7 +1750,8 @@ document.getElementById('btn-save-progress').addEventListener('click', () => {
     r.descuento ? r.descuento.value : '',
     r.cursoOriginal || '',
     r.cargo || '',
-    disabledRecords.has(i) ? 'NO' : 'SI'
+    disabledRecords.has(i) ? 'NO' : 'SI',
+    r.grupoNumero || ''
   ]);
 
   const dataSheet = XLSX.utils.aoa_to_sheet([dataHeaders, ...dataRows]);
@@ -1772,20 +1778,20 @@ document.getElementById('btn-save-progress').addEventListener('click', () => {
 });
 
 // ===== Group students by curso (all students, for lists mode) =====
-function parseGrupoLabel(cursoOriginal) {
-  if (!cursoOriginal) return null;
-  // Pattern: "7-1-EBI" → curso=7, grupo=1 → "7°1"
-  const m = cursoOriginal.trim().match(/^(\d+)-(\d+)/);
-  if (m) return `${m[1]}°${m[2]}`;
-  return null;
-}
-
 function getStudentGroupsAll() {
   const groups = {};
   allRecords.forEach(r => {
     if (r.relacion !== 'ESTUDIANTE') return;
-    // Parse curso and grupo from cursoOriginal for human-readable label
-    const label = parseGrupoLabel(r.cursoOriginal) || r.cursoOriginal || `${r.ciclo} ${r.grado}`;
+    // Build group label from grado (curso) + grupoNumero (column 2)
+    // e.g., grado="7", grupoNumero="1" → "7°1"
+    let label;
+    if (r.grado && r.grupoNumero) {
+      label = `${r.grado}°${r.grupoNumero}`;
+    } else if (r.grado) {
+      label = `${r.grado}°`;
+    } else {
+      label = r.cursoOriginal || `${r.ciclo} ${r.grado}`;
+    }
     if (!label.trim()) return;
     if (!groups[label]) groups[label] = [];
     groups[label].push(r);
