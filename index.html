@@ -849,29 +849,31 @@ function normalizeCiclo(ciclo) {
 
 // ===== Course to Grade/Ciclo mapping =====
 function parseCurso(curso) {
-  if (!curso) return { grado: '', ciclo: '' };
+  if (!curso) return { grado: '', ciclo: '', especialidad: '' };
   curso = curso.trim();
 
   // Extract the number at the beginning
   const numMatch = curso.match(/^(\d+)/);
-  if (!numMatch) return { grado: '', ciclo: '' };
+  if (!numMatch) return { grado: '', ciclo: '', especialidad: '' };
   const num = parseInt(numMatch[1]);
 
   // Determine ciclo and grado
   if (curso.includes('EBI')) {
     if (num >= 1 && num <= 6) {
-      return { grado: String(num), ciclo: 'PRIMARIA' };
+      return { grado: String(num), ciclo: 'PRIMARIA', especialidad: '' };
     } else if (num >= 7 && num <= 9) {
-      return { grado: String(num), ciclo: 'EDUCACION MEDIA BASICA' };
+      return { grado: String(num), ciclo: 'EDUCACION MEDIA BASICA', especialidad: '' };
     }
   }
   if (curso.includes('EMS')) {
     // Educación Media Superior - use 4TO CICLO
-    // 1-EMS = 1, 2XX-EMS = 2, 3XX-EMS = 3
-    return { grado: String(num), ciclo: '4TO CICLO' };
+    // Extract specialty code: "2CT-EMS" → "CT", "3CVH-EMS" → "CVH", "1-EMS" → ""
+    const emsMatch = curso.match(/^\d+([A-Z]+)?-?EMS$/i);
+    const especialidad = (emsMatch && emsMatch[1]) ? emsMatch[1].toUpperCase() : '';
+    return { grado: String(num), ciclo: '4TO CICLO', especialidad: especialidad };
   }
 
-  return { grado: String(num), ciclo: '' };
+  return { grado: String(num), ciclo: '', especialidad: '' };
 }
 
 // Determine if file is primaria or secundaria based on cursos
@@ -917,7 +919,7 @@ function parseStudentFile(wb) {
     const primerApellido = getVal(11).trim();
     const fecNac = cleanDate(getVal(15));
 
-    const { grado, ciclo } = parseCurso(curso);
+    const { grado, ciclo, especialidad } = parseCurso(curso);
 
     records.push({
       ci: doc,
@@ -931,7 +933,8 @@ function parseStudentFile(wb) {
       becaTotal: 'NO',
       descuento: null, // null = no discount set
       cursoOriginal: curso,
-      grupoNumero: grupoCol // Grupo number from column 2
+      grupoNumero: grupoCol, // Grupo number from column 2
+      especialidad: especialidad // Specialty code for EMS (e.g., "CT", "CVH", "CSH")
     });
   }
 
@@ -998,7 +1001,8 @@ function parseStaffFile(wb) {
       anualidad: 'N/A',
       becaTotal: 'N/A',
       descuento: null,
-      cargo: cargo
+      cargo: cargo,
+      especialidad: ''
     });
   }
 
@@ -1100,8 +1104,15 @@ document.getElementById('file-progress').addEventListener('change', async (e) =>
           descuento: null,
           cursoOriginal: String(row['CURSO_ORIGINAL'] || ''),
           cargo: String(row['CARGO'] || ''),
-          grupoNumero: String(row['GRUPO_NUMERO'] || '')
+          grupoNumero: String(row['GRUPO_NUMERO'] || ''),
+          especialidad: String(row['ESPECIALIDAD'] || '')
         };
+
+        // If especialidad is missing (old progress file), try to extract from cursoOriginal
+        if (!record.especialidad && record.cursoOriginal) {
+          const parsed = parseCurso(record.cursoOriginal);
+          record.especialidad = parsed.especialidad || '';
+        }
 
         if (row['DESCUENTO_TIPO'] && row['DESCUENTO_VALOR'] !== undefined && row['DESCUENTO_VALOR'] !== '') {
           record.descuento = {
@@ -1210,7 +1221,8 @@ document.getElementById('file-progress').addEventListener('change', async (e) =>
           descuento: null,
           cursoOriginal: '',
           cargo: '',
-          grupoNumero: ''
+          grupoNumero: '',
+          especialidad: ''
         };
 
         // If student has a specific anualidad, set it as custom discount
@@ -1844,7 +1856,7 @@ document.getElementById('btn-save-progress').addEventListener('click', () => {
   const dataHeaders = [
     'CI', 'FECHA_NAC', 'PRIMER_NOMBRE', 'PRIMER_APELLIDO',
     'CICLO', 'GRADO', 'RELACION', 'ANUALIDAD', 'BECA_TOTAL',
-    'DESCUENTO_TIPO', 'DESCUENTO_VALOR', 'CURSO_ORIGINAL', 'CARGO', 'ACTIVO', 'GRUPO_NUMERO'
+    'DESCUENTO_TIPO', 'DESCUENTO_VALOR', 'CURSO_ORIGINAL', 'CARGO', 'ACTIVO', 'GRUPO_NUMERO', 'ESPECIALIDAD'
   ];
 
   const dataRows = allRecords.map((r, i) => [
@@ -1862,7 +1874,8 @@ document.getElementById('btn-save-progress').addEventListener('click', () => {
     r.cursoOriginal || '',
     r.cargo || '',
     disabledRecords.has(i) ? 'NO' : 'SI',
-    r.grupoNumero || ''
+    r.grupoNumero || '',
+    r.especialidad || ''
   ]);
 
   const dataSheet = XLSX.utils.aoa_to_sheet([dataHeaders, ...dataRows]);
@@ -1893,8 +1906,9 @@ function getStudentGroupsAll() {
   const groups = {};
   allRecords.forEach(r => {
     if (r.relacion !== 'ESTUDIANTE') return;
-    // Build group label from grado (curso) + grupoNumero (column 2)
+    // Build group label from grado (curso) + grupoNumero (column 2) + especialidad
     // e.g., grado="7", grupoNumero="1" → "7°1"
+    // e.g., grado="2", grupoNumero="1", especialidad="CT" → "2°1 (CT)"
     let label;
     if (r.grado && r.grupoNumero) {
       label = `${r.grado}°${r.grupoNumero}`;
@@ -1903,18 +1917,29 @@ function getStudentGroupsAll() {
     } else {
       label = r.cursoOriginal || `${r.ciclo} ${r.grado}`;
     }
+    // Append specialty for EMS students (bachillerato)
+    if (r.especialidad) {
+      label += ` (${r.especialidad})`;
+    }
     if (!label.trim()) return;
     if (!groups[label]) groups[label] = [];
     groups[label].push(r);
   });
-  // Sort groups: by curso number first, then grupo number
+  // Sort groups: by curso number first, then grupo number, then specialty
   const sorted = Object.keys(groups).sort((a, b) => {
-    const ma = a.match(/^(\d+)°(\d+)$/);
-    const mb = b.match(/^(\d+)°(\d+)$/);
+    const ma = a.match(/^(\d+)°(\d*)(?:\s*\(([^)]+)\))?$/);
+    const mb = b.match(/^(\d+)°(\d*)(?:\s*\(([^)]+)\))?$/);
     if (ma && mb) {
       const diff = parseInt(ma[1]) - parseInt(mb[1]);
       if (diff !== 0) return diff;
-      return parseInt(ma[2]) - parseInt(mb[2]);
+      const grpA = ma[2] ? parseInt(ma[2]) : 0;
+      const grpB = mb[2] ? parseInt(mb[2]) : 0;
+      const grpDiff = grpA - grpB;
+      if (grpDiff !== 0) return grpDiff;
+      // Sort by specialty alphabetically
+      const espA = ma[3] || '';
+      const espB = mb[3] || '';
+      return espA.localeCompare(espB);
     }
     if (ma) return -1;
     if (mb) return 1;
