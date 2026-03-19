@@ -957,60 +957,126 @@ function parseStaffFile(wb) {
   const range = XLSX.utils.decode_range(ws['!ref']);
   const records = [];
 
-  // Docente-eligible cargos
-  const docenteKeywords = ['maestr', 'profesor', 'director', 'subdirector'];
+  // Try to find header row and column indices dynamically
+  let headerRow = -1;
+  let colCI = -1, colNombre = -1, colApellido = -1, colFecNac = -1, colCargo = -1;
 
-  for (let r = 4; r <= range.e.r; r++) {
+  // Search first 10 rows for headers
+  for (let r = 0; r <= Math.min(9, range.e.r); r++) {
+    for (let c = 0; c <= range.e.c; c++) {
+      const cell = ws[XLSX.utils.encode_cell({r, c})];
+      if (!cell) continue;
+      const val = String(cell.v || '').trim().toUpperCase();
+      if (val.includes('DOCUMENTO') || val === 'CI' || val === 'CEDULA' || val === 'NRO. DOCUMENTO' || val === 'NRO DOCUMENTO' || val === 'Nº DOCUMENTO') {
+        colCI = c; headerRow = r;
+      }
+      if (val === 'NOMBRE' || val === 'PRIMER NOMBRE' || val === 'NOMBRES') {
+        colNombre = c; headerRow = r;
+      }
+      if (val === 'APELLIDO' || val === 'PRIMER APELLIDO' || val === 'APELLIDOS') {
+        colApellido = c; headerRow = r;
+      }
+      if (val.includes('NACIMIENTO') || val === 'FEC. NAC.' || val === 'FEC NAC' || val === 'FECHA NAC') {
+        colFecNac = c; headerRow = r;
+      }
+      if (val === 'CARGO' || val === 'CARGOS' || val.includes('CARGO')) {
+        colCargo = c; headerRow = r;
+      }
+    }
+    if (headerRow >= 0) break;
+  }
+
+  // Fallback to fixed columns if headers not found
+  if (colCI < 0) colCI = 1;        // Column B (2 in 1-indexed)
+  if (colNombre < 0) colNombre = 2; // Column C (3 in 1-indexed)
+  if (colApellido < 0) colApellido = 4; // Column E (5 in 1-indexed)
+  if (colFecNac < 0) colFecNac = 9;  // Column J (10 in 1-indexed)
+  if (colCargo < 0) colCargo = 73;   // Column BV (74 in 1-indexed)
+
+  const dataStartRow = headerRow >= 0 ? headerRow + 1 : 4;
+
+  // Docente-eligible cargo keywords (for ciclo classification)
+  const cicloPrimaria = ['primaria', 'maestra referente', 'maestra especializada', 'maestr'];
+  const cicloInicial = ['inicial', 'jardin'];
+  const cicloMedia = ['liceo', 'profesor', 'secundaria', 'media'];
+
+  const seenCIs = new Set();
+
+  for (let r = dataStartRow; r <= range.e.r; r++) {
     const getVal = (c) => {
-      const cell = ws[XLSX.utils.encode_cell({r, c: c-1})];
+      const cell = ws[XLSX.utils.encode_cell({r, c})];
       return cell ? String(cell.v || '').trim() : '';
     };
 
-    const cargo = getVal(74);
-    if (!cargo) continue;
+    // Try to get CI - check the identified column and also nearby columns
+    let doc = getVal(colCI).replace(/\D/g, '');
 
-    // Check if docente-eligible
-    const isDocente = docenteKeywords.some(k => cargo.toLowerCase().includes(k));
-    if (!isDocente) continue;
+    // If no CI found in expected column, scan first few columns for a CI-like value
+    if (!doc) {
+      for (let c = 0; c <= Math.min(10, range.e.c); c++) {
+        const v = getVal(c).replace(/\D/g, '');
+        if (v.length >= 6 && v.length <= 8) {
+          doc = v;
+          break;
+        }
+      }
+    }
+    if (!doc || doc.length < 6) continue;
 
-    const doc = getVal(2).replace(/\D/g, '');
-    if (!doc) continue;
+    // Skip duplicates
+    if (seenCIs.has(doc)) continue;
+    seenCIs.add(doc);
 
-    const primerNombre = getVal(3).trim();
-    const primerApellido = getVal(5).trim();
-    const fecNac = cleanDate(getVal(10));
+    const primerNombre = getVal(colNombre).trim();
+    const primerApellido = getVal(colApellido).trim();
+    const fecNac = cleanDate(getVal(colFecNac));
 
-    // Determine ciclo based on cargo
+    // Get cargo - try identified column, and also scan for non-empty value in later columns
+    let cargo = getVal(colCargo);
+    if (!cargo && colCargo > 20) {
+      // Try a few nearby columns
+      for (let c = colCargo - 3; c <= Math.min(colCargo + 3, range.e.c); c++) {
+        const v = getVal(c);
+        if (v && v.length > 3) { cargo = v; break; }
+      }
+    }
+
+    // Accept ALL staff - no keyword filtering. Everyone in the staff file is a docente for Ceibal.
+    // Determine ciclo based on cargo for classification purposes
     let ciclo = '';
-    if (cargo.toLowerCase().includes('inicial')) {
+    const cargoLower = (cargo || '').toLowerCase();
+    if (cicloInicial.some(k => cargoLower.includes(k))) {
       ciclo = 'INICIAL';
-    } else if (cargo.toLowerCase().includes('primaria') || cargo.toLowerCase().includes('maestra referente') || cargo.toLowerCase().includes('maestra especializada')) {
+    } else if (cicloPrimaria.some(k => cargoLower.includes(k))) {
       ciclo = 'PRIMARIA';
-    } else if (cargo.toLowerCase().includes('liceo') || cargo.toLowerCase().includes('profesor')) {
+    } else if (cicloMedia.some(k => cargoLower.includes(k))) {
       ciclo = 'EDUCACION MEDIA BASICA';
     }
     // Directors
-    if (cargo.toLowerCase().includes('director colegio')) ciclo = 'PRIMARIA';
-    if (cargo.toLowerCase().includes('director liceo')) ciclo = 'EDUCACION MEDIA BASICA';
+    if (cargoLower.includes('director colegio')) ciclo = 'PRIMARIA';
+    if (cargoLower.includes('director liceo')) ciclo = 'EDUCACION MEDIA BASICA';
 
-    // If still empty and has multiple roles, pick first relevant one
+    // Default ciclo based on student file type
     if (!ciclo) {
-      if (cargo.toLowerCase().includes('maestr')) ciclo = 'PRIMARIA';
-      else ciclo = 'EDUCACION MEDIA BASICA';
+      if (studentFileType === 'secundaria') {
+        ciclo = 'EDUCACION MEDIA BASICA';
+      } else {
+        ciclo = 'PRIMARIA';
+      }
     }
 
     records.push({
       ci: doc,
       fechaNac: fecNac,
-      primerNombre: primerNombre.toUpperCase(),
-      primerApellido: primerApellido.toUpperCase(),
+      primerNombre: (primerNombre || 'SIN NOMBRE').toUpperCase(),
+      primerApellido: (primerApellido || 'SIN APELLIDO').toUpperCase(),
       ciclo: ciclo,
       grado: 'MULTIGRADO',
       relacion: 'DOCENTE',
       anualidad: 'N/A',
       becaTotal: 'N/A',
       descuento: null,
-      cargo: cargo,
+      cargo: cargo || 'PERSONAL',
       especialidad: ''
     });
   }
