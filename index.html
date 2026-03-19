@@ -619,21 +619,9 @@
     <div class="card">
       <div class="card-title"><span class="icon">📋</span> Grupos detectados</div>
       <div id="group-preview-lists" style="margin-bottom:1rem;"></div>
-
-      <div class="form-row" style="margin-bottom:1rem;">
-        <div class="form-group">
-          <label>Cantidad de archivos a descargar</label>
-          <div style="display:flex;align-items:center;gap:0.8rem;">
-            <input type="range" id="file-count-slider" min="1" max="1" value="1" style="flex:1;">
-            <span id="file-count-label" style="min-width:120px;font-size:0.9rem;font-weight:600;color:var(--accent);"></span>
-          </div>
-          <span style="color:var(--text-dim);font-size:0.75rem;">1 = todo junto en un archivo · máximo = un archivo por grupo</span>
-        </div>
-      </div>
-
       <div style="display:flex;gap:0.8rem;flex-wrap:wrap;">
-        <button class="btn btn-primary" id="btn-pdf-groups">📄 Descargar PDFs</button>
-        <button class="btn btn-outline" id="btn-excel-groups">📊 Descargar Excel</button>
+        <button class="btn btn-primary" id="btn-pdf-groups">📄 Descargar PDFs por grupo</button>
+        <button class="btn btn-outline" id="btn-excel-groups">📊 Descargar Excel por grupo</button>
       </div>
     </div>
 
@@ -737,6 +725,15 @@
           <tbody id="table-body"></tbody>
         </table>
       </div>
+    </div>
+
+    <div class="card" id="report-file-count-card" style="display:none;">
+      <div class="card-title"><span class="icon">📦</span> Cantidad de archivos</div>
+      <div style="display:flex;align-items:center;gap:0.8rem;">
+        <input type="range" id="report-file-count-slider" min="1" max="1" value="1" style="flex:1;">
+        <span id="report-file-count-label" style="min-width:140px;font-size:0.9rem;font-weight:600;color:var(--accent);"></span>
+      </div>
+      <span style="color:var(--text-dim);font-size:0.75rem;">Elegí en cuántos archivos dividir la planilla. Los registros se distribuyen equitativamente.</span>
     </div>
 
     <div style="display:flex;gap:0.8rem;margin-top:1rem;flex-wrap:wrap;">
@@ -1371,29 +1368,6 @@ function renderGroupListsStep() {
   } else {
     gpEl.innerHTML = '<span style="color:var(--text-dim);font-size:0.8rem;">No hay grupos detectados</span>';
   }
-
-  // Configure file count slider
-  const slider = document.getElementById('file-count-slider');
-  const label = document.getElementById('file-count-label');
-  const max = Math.max(groupKeys.length, 1);
-  slider.max = max;
-  slider.value = max; // Default: one file per group
-  updateFileCountLabel(parseInt(slider.value), max);
-
-  slider.oninput = () => {
-    updateFileCountLabel(parseInt(slider.value), max);
-  };
-}
-
-function updateFileCountLabel(val, max) {
-  const label = document.getElementById('file-count-label');
-  if (val === 1) {
-    label.textContent = '1 archivo (todo junto)';
-  } else if (val === max) {
-    label.textContent = `${val} archivos (por grupo)`;
-  } else {
-    label.textContent = `${val} archivos`;
-  }
 }
 
 // Step 1 → Mode selection
@@ -1541,9 +1515,40 @@ function renderStep3() {
     dlBtn.title = '';
   }
 
+  // Update report file count slider
+  const reportSlider = document.getElementById('report-file-count-slider');
+  const reportCard = document.getElementById('report-file-count-card');
+  if (exportCount >= MIN_ROWS_PER_FILE) {
+    const maxFiles = Math.floor(exportCount / MIN_ROWS_PER_FILE);
+    reportSlider.max = maxFiles;
+    if (parseInt(reportSlider.value) > maxFiles) reportSlider.value = maxFiles;
+    // Default to automatic calculation
+    if (!reportSlider.dataset.userSet) reportSlider.value = fileCount;
+    updateReportFileCountLabel();
+    reportCard.style.display = '';
+  } else {
+    reportCard.style.display = 'none';
+  }
+
   renderTable();
   renderValidation();
 }
+
+function updateReportFileCountLabel() {
+  const slider = document.getElementById('report-file-count-slider');
+  const label = document.getElementById('report-file-count-label');
+  const val = parseInt(slider.value);
+  if (val === 1) {
+    label.textContent = '1 archivo (todo junto)';
+  } else {
+    label.textContent = `${val} archivos`;
+  }
+}
+
+document.getElementById('report-file-count-slider').addEventListener('input', () => {
+  document.getElementById('report-file-count-slider').dataset.userSet = '1';
+  updateReportFileCountLabel();
+});
 
 function toggleCiclo(cb) {
   const ciclo = cb.dataset.ciclo;
@@ -1825,12 +1830,8 @@ document.getElementById('btn-download').addEventListener('click', () => {
   const teacherRows = rows.filter(r => r[6] === 'DOCENTE');
   const totalRows = rows.length;
 
-  // Calculate optimal file count: each file must have between MIN and MAX rows
-  // Find the maximum number of files where each file has at least MIN_ROWS_PER_FILE
-  let fileCount = Math.ceil(totalRows / MAX_ROWS_PER_FILE);
-  while (fileCount > 1 && Math.floor(totalRows / fileCount) < MIN_ROWS_PER_FILE) {
-    fileCount--;
-  }
+  // Use the user-selected file count from the slider
+  let fileCount = parseInt(document.getElementById('report-file-count-slider').value) || 1;
 
   // Distribute students and teachers proportionally across files
   const chunks = [];
@@ -1985,67 +1986,7 @@ function getStudentGroupsAll() {
   return result;
 }
 
-// ===== Distribute groups equitably into N chunks =====
-function distributeGroups(groupKeys, numFiles) {
-  if (numFiles >= groupKeys.length) {
-    // One group per file
-    return groupKeys.map(k => [k]);
-  }
-  const chunks = Array.from({ length: numFiles }, () => []);
-  groupKeys.forEach((k, i) => {
-    chunks[i % numFiles].push(k);
-  });
-  return chunks;
-}
-
-// ===== Add group section to a jsPDF doc =====
-function addGroupToPdf(doc, grupo, students, nombre, isFirst) {
-  if (!isFirst) doc.addPage();
-
-  // Header
-  doc.setFontSize(16);
-  doc.setFont('helvetica', 'bold');
-  doc.text(`Lista de cedulas por grupo - ${grupo}`, 105, 20, { align: 'center' });
-
-  // Subtitle: school name
-  doc.setFontSize(12);
-  doc.setFont('helvetica', 'normal');
-  doc.text(nombre, 105, 28, { align: 'center' });
-
-  // Separator line
-  doc.setDrawColor(100, 100, 100);
-  doc.line(20, 32, 190, 32);
-
-  // List of CIs
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(11);
-  let y = 40;
-  const pageHeight = 280;
-
-  students.forEach(s => {
-    if (y > pageHeight) {
-      doc.addPage();
-      y = 20;
-    }
-    doc.text(s.ci, 20, y);
-    y += 7;
-  });
-
-  // Footer: total
-  if (y > pageHeight - 15) {
-    doc.addPage();
-    y = 20;
-  }
-  y += 5;
-  doc.setDrawColor(100, 100, 100);
-  doc.line(20, y, 190, y);
-  y += 7;
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
-  doc.text(`Total: ${students.length} estudiantes`, 20, y);
-}
-
-// ===== PDF download =====
+// ===== PDF per group =====
 document.getElementById('btn-pdf-groups').addEventListener('click', () => {
   const groups = getStudentGroupsAll();
   const groupKeys = Object.keys(groups);
@@ -2061,30 +2002,62 @@ document.getElementById('btn-pdf-groups').addEventListener('click', () => {
     return;
   }
 
-  const numFiles = parseInt(document.getElementById('file-count-slider').value) || groupKeys.length;
-  const chunks = distributeGroups(groupKeys, numFiles);
+  alert(`Se van a descargar ${groupKeys.length} PDFs, uno por cada grupo.`);
 
-  alert(`Se van a descargar ${chunks.length} PDF${chunks.length > 1 ? 's' : ''}.`);
-
-  chunks.forEach((chunkKeys, idx) => {
+  groupKeys.forEach((grupo, idx) => {
+    const students = groups[grupo];
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
 
-    chunkKeys.forEach((grupo, gi) => {
-      addGroupToPdf(doc, grupo, groups[grupo], nombre, gi === 0);
+    // Header
+    doc.setFontSize(16);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Lista de cedulas por grupo - ${grupo}`, 105, 20, { align: 'center' });
+
+    // Subtitle: school name
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'normal');
+    doc.text(nombre, 105, 28, { align: 'center' });
+
+    // Separator line
+    doc.setDrawColor(100, 100, 100);
+    doc.line(20, 32, 190, 32);
+
+    // List of CIs, one per line
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(11);
+    let y = 40;
+    const pageHeight = 280;
+
+    students.forEach(s => {
+      if (y > pageHeight) {
+        doc.addPage();
+        y = 20;
+      }
+      doc.text(s.ci, 20, y);
+      y += 7;
     });
 
-    const filename = chunks.length === 1
-      ? 'cedulas_todos_los_grupos.pdf'
-      : `cedulas_grupos_parte${idx + 1}.pdf`;
+    // Footer: total
+    if (y > pageHeight - 15) {
+      doc.addPage();
+      y = 20;
+    }
+    y += 5;
+    doc.setDrawColor(100, 100, 100);
+    doc.line(20, y, 190, y);
+    y += 7;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.text(`Total: ${students.length} estudiantes`, 20, y);
 
     setTimeout(() => {
-      doc.save(filename);
+      doc.save(`cedulas_grupo_${grupo.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`);
     }, idx * 500);
   });
 });
 
-// ===== Excel download =====
+// ===== Excel per group =====
 document.getElementById('btn-excel-groups').addEventListener('click', () => {
   const groups = getStudentGroupsAll();
   const groupKeys = Object.keys(groups);
@@ -2094,32 +2067,22 @@ document.getElementById('btn-excel-groups').addEventListener('click', () => {
     return;
   }
 
-  const numFiles = parseInt(document.getElementById('file-count-slider').value) || groupKeys.length;
-  const chunks = distributeGroups(groupKeys, numFiles);
+  alert(`Se van a descargar ${groupKeys.length} archivos Excel, uno por cada grupo.`);
 
-  alert(`Se van a descargar ${chunks.length} archivo${chunks.length > 1 ? 's' : ''} Excel.`);
+  groupKeys.forEach((grupo, idx) => {
+    const rows = groups[grupo].map(s => [
+      `${s.primerNombre} ${s.primerApellido}`,
+      s.ci
+    ]);
 
-  chunks.forEach((chunkKeys, idx) => {
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    ws['!cols'] = [{ wch: 30 }, { wch: 15 }];
+
     const wb = XLSX.utils.book_new();
-
-    chunkKeys.forEach(grupo => {
-      const rows = groups[grupo].map(s => [
-        `${s.primerNombre} ${s.primerApellido}`,
-        s.ci
-      ]);
-
-      const ws = XLSX.utils.aoa_to_sheet(rows);
-      ws['!cols'] = [{ wch: 30 }, { wch: 15 }];
-      // Sheet name max 31 chars
-      XLSX.utils.book_append_sheet(wb, ws, grupo.substring(0, 31));
-    });
-
-    const filename = chunks.length === 1
-      ? 'lista_todos_los_grupos.xlsx'
-      : `lista_grupos_parte${idx + 1}.xlsx`;
+    XLSX.utils.book_append_sheet(wb, ws, grupo.substring(0, 31));
 
     setTimeout(() => {
-      XLSX.writeFile(wb, filename, { bookType: 'xlsx' });
+      XLSX.writeFile(wb, `lista_grupo_${grupo.replace(/[^a-zA-Z0-9]/g, '_')}.xlsx`, { bookType: 'xls' });
     }, idx * 500);
   });
 });
