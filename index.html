@@ -956,93 +956,140 @@ function parseStaffFile(wb) {
   const ws = wb.Sheets[wb.SheetNames[0]];
   const range = XLSX.utils.decode_range(ws['!ref']);
   const records = [];
-
-  // Try to find header row and column indices dynamically
-  let headerRow = -1;
-  let colCI = -1, colNombre = -1, colApellido = -1, colFecNac = -1, colCargo = -1;
-
-  // Search first 10 rows for headers
-  for (let r = 0; r <= Math.min(9, range.e.r); r++) {
-    for (let c = 0; c <= range.e.c; c++) {
-      const cell = ws[XLSX.utils.encode_cell({r, c})];
-      if (!cell) continue;
-      const val = String(cell.v || '').trim().toUpperCase();
-      if (val.includes('DOCUMENTO') || val === 'CI' || val === 'CEDULA' || val === 'NRO. DOCUMENTO' || val === 'NRO DOCUMENTO' || val === 'Nº DOCUMENTO') {
-        colCI = c; headerRow = r;
-      }
-      if (val === 'NOMBRE' || val === 'PRIMER NOMBRE' || val === 'NOMBRES') {
-        colNombre = c; headerRow = r;
-      }
-      if (val === 'APELLIDO' || val === 'PRIMER APELLIDO' || val === 'APELLIDOS') {
-        colApellido = c; headerRow = r;
-      }
-      if (val.includes('NACIMIENTO') || val === 'FEC. NAC.' || val === 'FEC NAC' || val === 'FECHA NAC') {
-        colFecNac = c; headerRow = r;
-      }
-      if (val === 'CARGO' || val === 'CARGOS' || val.includes('CARGO')) {
-        colCargo = c; headerRow = r;
-      }
-    }
-    if (headerRow >= 0) break;
-  }
-
-  // Fallback to fixed columns if headers not found
-  if (colCI < 0) colCI = 1;        // Column B (2 in 1-indexed)
-  if (colNombre < 0) colNombre = 2; // Column C (3 in 1-indexed)
-  if (colApellido < 0) colApellido = 4; // Column E (5 in 1-indexed)
-  if (colFecNac < 0) colFecNac = 9;  // Column J (10 in 1-indexed)
-  if (colCargo < 0) colCargo = 73;   // Column BV (74 in 1-indexed)
-
-  const dataStartRow = headerRow >= 0 ? headerRow + 1 : 4;
+  const seenCIs = new Set();
 
   // Docente-eligible cargo keywords (for ciclo classification)
   const cicloPrimaria = ['primaria', 'maestra referente', 'maestra especializada', 'maestr'];
   const cicloInicial = ['inicial', 'jardin'];
   const cicloMedia = ['liceo', 'profesor', 'secundaria', 'media'];
 
-  const seenCIs = new Set();
+  // Helper to read cell value at (row, col) with 0-indexed columns
+  const getCellVal = (r, c) => {
+    const cell = ws[XLSX.utils.encode_cell({r, c})];
+    return cell ? String(cell.v || '').trim() : '';
+  };
 
-  for (let r = dataStartRow; r <= range.e.r; r++) {
-    const getVal = (c) => {
-      const cell = ws[XLSX.utils.encode_cell({r, c})];
-      return cell ? String(cell.v || '').trim() : '';
-    };
+  // ---- Step 1: Find the header row by scoring each of the first 10 rows ----
+  let headerRow = -1;
+  let bestScore = 0;
+  const headerPatterns = {
+    ci: v => /^(C\.?I\.?|N[ºRO.]*\s*DOC|DOC|DOCUMENTO|CEDULA|CÉDULA)$/i.test(v.replace(/[()]/g, '').trim()),
+    nombre: v => /^(NOMBRE|PRIMER\s*NOMBRE|NOMBRES)$/i.test(v),
+    apellido: v => /^(APELLIDO|PRIMER\s*APELLIDO|APELLIDOS)$/i.test(v),
+    fecNac: v => /NAC/i.test(v) && (v.length < 25),
+    cargo: v => /^CARGO[S]?$/i.test(v)
+  };
 
-    // Try to get CI - check the identified column and also nearby columns
-    let doc = getVal(colCI).replace(/\D/g, '');
-
-    // If no CI found in expected column, scan first few columns for a CI-like value
-    if (!doc) {
-      for (let c = 0; c <= Math.min(10, range.e.c); c++) {
-        const v = getVal(c).replace(/\D/g, '');
-        if (v.length >= 6 && v.length <= 8) {
-          doc = v;
-          break;
+  const detectedCols = {};
+  for (let r = 0; r <= Math.min(9, range.e.r); r++) {
+    let score = 0;
+    const rowCols = {};
+    for (let c = 0; c <= Math.min(range.e.c, 80); c++) {
+      const val = getCellVal(r, c);
+      if (!val) continue;
+      for (const [key, testFn] of Object.entries(headerPatterns)) {
+        if (!rowCols[key] && testFn(val)) {
+          rowCols[key] = c;
+          score++;
         }
       }
     }
-    if (!doc || doc.length < 6) continue;
+    if (score > bestScore) {
+      bestScore = score;
+      headerRow = r;
+      Object.assign(detectedCols, rowCols);
+    }
+  }
+
+  // Only trust header detection if we found at least 2 header matches
+  let colCI, colNombre, colApellido, colFecNac, colCargo;
+  if (bestScore >= 2) {
+    colCI = detectedCols.ci ?? 1;
+    colNombre = detectedCols.nombre ?? 2;
+    colApellido = detectedCols.apellido ?? 4;
+    colFecNac = detectedCols.fecNac ?? 9;
+    colCargo = detectedCols.cargo ?? 73;
+  } else {
+    // Fallback to hardcoded columns (original ExpDatosPersonal layout)
+    headerRow = -1;
+    colCI = 1;        // Column B
+    colNombre = 2;    // Column C
+    colApellido = 4;  // Column E
+    colFecNac = 9;    // Column J
+    colCargo = 73;    // Column BV
+  }
+
+  // ---- Step 2: Determine data start row ----
+  // Start right after header, or from row 1 if no header found
+  // But never later than row 5 to avoid skipping data
+  const dataStartRow = headerRow >= 0 ? Math.min(headerRow + 1, 5) : 1;
+
+  // ---- Step 3: Parse each data row ----
+  for (let r = dataStartRow; r <= range.e.r; r++) {
+    const getVal = (c) => getCellVal(r, c);
+
+    // --- Find CI: try known column, then nearby, then broader scan ---
+    let doc = '';
+    // Try the expected CI column and its neighbors
+    for (const c of [colCI, colCI - 1, colCI + 1, colCI + 2]) {
+      if (c < 0 || c > range.e.c) continue;
+      const v = getVal(c).replace(/\D/g, '');
+      if (v.length >= 6 && v.length <= 8) { doc = v; break; }
+    }
+    // Broader scan if still not found (first 15 columns)
+    if (!doc) {
+      for (let c = 0; c <= Math.min(15, range.e.c); c++) {
+        const v = getVal(c).replace(/\D/g, '');
+        if (v.length >= 6 && v.length <= 8) { doc = v; break; }
+      }
+    }
+    if (!doc) continue;
 
     // Skip duplicates
     if (seenCIs.has(doc)) continue;
     seenCIs.add(doc);
 
-    const primerNombre = getVal(colNombre).trim();
-    const primerApellido = getVal(colApellido).trim();
-    const fecNac = cleanDate(getVal(colFecNac));
+    // --- Get name and surname: try known columns, then infer ---
+    let primerNombre = getVal(colNombre);
+    let primerApellido = getVal(colApellido);
 
-    // Get cargo - try identified column, and also scan for non-empty value in later columns
-    let cargo = getVal(colCargo);
-    if (!cargo && colCargo > 20) {
-      // Try a few nearby columns
-      for (let c = colCargo - 3; c <= Math.min(colCargo + 3, range.e.c); c++) {
+    // If nombre looks like a CI number, it's the wrong column - try to find the real name
+    if (/^\d{6,}$/.test(primerNombre.replace(/\D/g, ''))) {
+      primerNombre = '';
+      // Scan nearby columns for a text value
+      for (let c = 0; c <= Math.min(15, range.e.c); c++) {
         const v = getVal(c);
-        if (v && v.length > 3) { cargo = v; break; }
+        if (v && !/^\d+$/.test(v) && v.length > 1 && !/^(URU|C\.?I\.?|\(C\.?I\.?\))$/i.test(v.replace(/[()]/g, '').trim())) {
+          primerNombre = v;
+          // Next non-numeric column is likely surname
+          for (let c2 = c + 1; c2 <= Math.min(c + 5, range.e.c); c2++) {
+            const v2 = getVal(c2);
+            if (v2 && !/^\d+$/.test(v2) && v2.length > 1) {
+              primerApellido = v2;
+              break;
+            }
+          }
+          break;
+        }
       }
     }
 
-    // Accept ALL staff - no keyword filtering. Everyone in the staff file is a docente for Ceibal.
-    // Determine ciclo based on cargo for classification purposes
+    const fecNac = cleanDate(getVal(colFecNac));
+
+    // --- Get cargo: try known column, then scan last 20 columns ---
+    let cargo = getVal(colCargo);
+    if (!cargo) {
+      // Scan from column 60 onwards for a text value that looks like a cargo
+      for (let c = Math.max(60, range.e.c - 20); c <= range.e.c; c++) {
+        const v = getVal(c);
+        if (v && v.length > 5 && /[a-záéíóúñ]/i.test(v)) {
+          cargo = v;
+          break;
+        }
+      }
+    }
+
+    // Determine ciclo based on cargo
     let ciclo = '';
     const cargoLower = (cargo || '').toLowerCase();
     if (cicloInicial.some(k => cargoLower.includes(k))) {
@@ -1052,7 +1099,6 @@ function parseStaffFile(wb) {
     } else if (cicloMedia.some(k => cargoLower.includes(k))) {
       ciclo = 'EDUCACION MEDIA BASICA';
     }
-    // Directors
     if (cargoLower.includes('director colegio')) ciclo = 'PRIMARIA';
     if (cargoLower.includes('director liceo')) ciclo = 'EDUCACION MEDIA BASICA';
 
