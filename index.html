@@ -973,10 +973,10 @@ function parseStaffFile(wb) {
   let headerRow = -1;
   let bestScore = 0;
   const headerPatterns = {
-    ci: v => /^(C\.?I\.?|N[ºRO.]*\s*DOC|DOC|DOCUMENTO|CEDULA|CÉDULA)$/i.test(v.replace(/[()]/g, '').trim()),
+    ci: v => /^(C\.?I\.?|N[ºRO.]*\s*DOC.*|DOC|DOCUMENTO|CEDULA|CÉDULA)$/i.test(v.replace(/[()]/g, '').trim()),
     nombre: v => /^(NOMBRE|PRIMER\s*NOMBRE|NOMBRES)$/i.test(v),
     apellido: v => /^(APELLIDO|PRIMER\s*APELLIDO|APELLIDOS)$/i.test(v),
-    fecNac: v => /NAC/i.test(v) && (v.length < 25),
+    fecNac: v => /FECHA/i.test(v) || (/^FEC/i.test(v) && /NAC/i.test(v)),
     cargo: v => /^CARGO[S]?$/i.test(v)
   };
 
