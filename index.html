@@ -1629,24 +1629,54 @@ function renderStep3() {
   }
 
   // Update report file count dropdown
+  // Teachers are repeated in every file, so max files is based on students only
   const reportSelect = document.getElementById('report-file-count-select');
   const reportCard = document.getElementById('report-file-count-card');
   if (exportCount >= MIN_ROWS_PER_FILE) {
-    const maxFiles = Math.floor(exportCount / MIN_ROWS_PER_FILE);
+    const studentsAvail = expStudents;
+    const teachersAvail = expTeachers;
+    // Each file gets all teachers + a slice of students, and must have between MIN and MAX rows
+    const slotsForStudents = MAX_ROWS_PER_FILE - teachersAvail;
+    let maxFiles;
+    if (slotsForStudents <= 0) {
+      maxFiles = 1; // more teachers than max rows, can't split
+    } else {
+      maxFiles = Math.max(1, Math.ceil(studentsAvail / slotsForStudents));
+    }
+    // Also ensure each file has at least MIN_ROWS_PER_FILE rows
+    // Each file will have: ceil(students/n) + teachers >= MIN_ROWS_PER_FILE
+    // So we also cap: ceil(students/n) + teachers <= MAX => n >= students / (MAX - teachers)
+    // And: ceil(students/n) + teachers >= MIN => n <= students / (MIN - teachers) (if MIN > teachers)
+    let minFiles = slotsForStudents > 0 ? Math.ceil(studentsAvail / slotsForStudents) : 1;
+    if (minFiles < 1) minFiles = 1;
+    if (maxFiles < minFiles) maxFiles = minFiles;
+
     const currentVal = parseInt(reportSelect.value) || 1;
     // Rebuild options
     reportSelect.innerHTML = '';
-    for (let i = 1; i <= maxFiles; i++) {
+    for (let i = minFiles; i <= maxFiles; i++) {
       const opt = document.createElement('option');
       opt.value = i;
-      opt.textContent = i === 1 ? '1 archivo (todo junto)' : `${i} archivos`;
+      const studentsEach = Math.ceil(studentsAvail / i);
+      const totalEach = studentsEach + teachersAvail;
+      opt.textContent = i === 1
+        ? `1 archivo (${exportCount} registros)`
+        : `${i} archivos (~${totalEach} registros c/u, docentes repetidos)`;
+      reportSelect.appendChild(opt);
+    }
+    // If only one option and it's 1, still show it
+    if (reportSelect.options.length === 0) {
+      const opt = document.createElement('option');
+      opt.value = 1;
+      opt.textContent = `1 archivo (${exportCount} registros)`;
       reportSelect.appendChild(opt);
     }
     // Restore previous selection or default
-    if (reportSelect.dataset.userSet && currentVal <= maxFiles) {
+    if (reportSelect.dataset.userSet && currentVal >= minFiles && currentVal <= maxFiles) {
       reportSelect.value = currentVal;
     } else {
       reportSelect.value = Math.min(fileCount, maxFiles);
+      if (parseInt(reportSelect.value) < minFiles) reportSelect.value = minFiles;
     }
     reportCard.style.display = '';
   } else {
@@ -1944,21 +1974,20 @@ document.getElementById('btn-download').addEventListener('click', () => {
   // Use the user-selected file count from the slider
   let fileCount = parseInt(document.getElementById('report-file-count-select').value) || 1;
 
-  // Distribute students and teachers proportionally across files
+  // Distribute students across files; teachers are repeated in every file
   const chunks = [];
   if (fileCount <= 1) {
     chunks.push([...studentRows, ...teacherRows]);
   } else {
     const studentsPerFile = Math.ceil(studentRows.length / fileCount);
-    const teachersPerFile = Math.ceil(teacherRows.length / fileCount);
 
     for (let f = 0; f < fileCount; f++) {
       const sStart = f * studentsPerFile;
       const sSlice = studentRows.slice(sStart, sStart + studentsPerFile);
-      const tStart = f * teachersPerFile;
-      const tSlice = teacherRows.slice(tStart, tStart + teachersPerFile);
-      const chunk = [...sSlice, ...tSlice];
-      if (chunk.length > 0) chunks.push(chunk);
+      if (sSlice.length > 0) {
+        // Each file gets its slice of students + ALL teachers
+        chunks.push([...sSlice, ...teacherRows]);
+      }
     }
   }
 
@@ -1977,7 +2006,7 @@ document.getElementById('btn-download').addEventListener('click', () => {
       const t = chunk.filter(r => r[6] === 'DOCENTE').length;
       return `  Parte ${i+1}: ${chunk.length} registros (${s} estudiantes, ${t} docentes)`;
     }).join('\n');
-    alert(`Se van a descargar ${chunks.length} archivos con distribución equitativa:\n\n${detail}`);
+    alert(`Se van a descargar ${chunks.length} archivos.\nLos ${teacherRows.length} docentes se repiten en cada archivo.\nLos ${studentRows.length} estudiantes se reparten equitativamente.\n\n${detail}`);
     chunks.forEach((chunk, idx) => {
       const data = [headers, ...chunk];
       const ws = XLSX.utils.aoa_to_sheet(data);
