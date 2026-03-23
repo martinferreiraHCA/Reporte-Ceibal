@@ -730,8 +730,9 @@
     <div class="card" id="report-file-count-card" style="display:none;">
       <div class="card-title"><span class="icon">📦</span> Cantidad de archivos</div>
       <div style="display:flex;align-items:center;gap:0.8rem;">
-        <input type="range" id="report-file-count-slider" min="1" max="1" value="1" style="flex:1;">
-        <span id="report-file-count-label" style="min-width:140px;font-size:0.9rem;font-weight:600;color:var(--accent);"></span>
+        <select id="report-file-count-select" style="padding:0.4rem 0.6rem;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:0.95rem;min-width:180px;">
+          <option value="1">1 archivo (todo junto)</option>
+        </select>
       </div>
       <span style="color:var(--text-dim);font-size:0.75rem;">Elegí en cuántos archivos dividir la planilla. Los registros se distribuyen equitativamente.</span>
     </div>
@@ -1627,16 +1628,26 @@ function renderStep3() {
     dlBtn.title = '';
   }
 
-  // Update report file count slider
-  const reportSlider = document.getElementById('report-file-count-slider');
+  // Update report file count dropdown
+  const reportSelect = document.getElementById('report-file-count-select');
   const reportCard = document.getElementById('report-file-count-card');
   if (exportCount >= MIN_ROWS_PER_FILE) {
     const maxFiles = Math.floor(exportCount / MIN_ROWS_PER_FILE);
-    reportSlider.max = maxFiles;
-    if (parseInt(reportSlider.value) > maxFiles) reportSlider.value = maxFiles;
-    // Default to automatic calculation
-    if (!reportSlider.dataset.userSet) reportSlider.value = fileCount;
-    updateReportFileCountLabel();
+    const currentVal = parseInt(reportSelect.value) || 1;
+    // Rebuild options
+    reportSelect.innerHTML = '';
+    for (let i = 1; i <= maxFiles; i++) {
+      const opt = document.createElement('option');
+      opt.value = i;
+      opt.textContent = i === 1 ? '1 archivo (todo junto)' : `${i} archivos`;
+      reportSelect.appendChild(opt);
+    }
+    // Restore previous selection or default
+    if (reportSelect.dataset.userSet && currentVal <= maxFiles) {
+      reportSelect.value = currentVal;
+    } else {
+      reportSelect.value = Math.min(fileCount, maxFiles);
+    }
     reportCard.style.display = '';
   } else {
     reportCard.style.display = 'none';
@@ -1646,20 +1657,8 @@ function renderStep3() {
   renderValidation();
 }
 
-function updateReportFileCountLabel() {
-  const slider = document.getElementById('report-file-count-slider');
-  const label = document.getElementById('report-file-count-label');
-  const val = parseInt(slider.value);
-  if (val === 1) {
-    label.textContent = '1 archivo (todo junto)';
-  } else {
-    label.textContent = `${val} archivos`;
-  }
-}
-
-document.getElementById('report-file-count-slider').addEventListener('input', () => {
-  document.getElementById('report-file-count-slider').dataset.userSet = '1';
-  updateReportFileCountLabel();
+document.getElementById('report-file-count-select').addEventListener('change', () => {
+  document.getElementById('report-file-count-select').dataset.userSet = '1';
 });
 
 function toggleCiclo(cb) {
@@ -1943,7 +1942,7 @@ document.getElementById('btn-download').addEventListener('click', () => {
   const totalRows = rows.length;
 
   // Use the user-selected file count from the slider
-  let fileCount = parseInt(document.getElementById('report-file-count-slider').value) || 1;
+  let fileCount = parseInt(document.getElementById('report-file-count-select').value) || 1;
 
   // Distribute students and teachers proportionally across files
   const chunks = [];
