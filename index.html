@@ -507,6 +507,7 @@
   .val-warn { color: var(--orange); }
   .val-error { color: var(--red); }
   .val-ok { color: var(--green); }
+  .val-info { color: var(--text-dim); }
 </style>
 </head>
 <body>
@@ -2500,13 +2501,11 @@ function runValidation() {
       issues.push({ type: 'warn', msg: `${label}: CI con formato inusual "${r.ci}" (se esperan 6-8 dígitos)`, idx: i });
     }
 
-    // Missing date
-    if (r.relacion === 'ESTUDIANTE') {
-      if (!r.fechaNac || r.fechaNac.trim() === '') {
-        issues.push({ type: 'error', msg: `${label}: falta fecha de nacimiento`, idx: i });
-      } else if (!validDateRegex.test(r.fechaNac)) {
-        issues.push({ type: 'warn', msg: `${label}: fecha con formato inusual "${r.fechaNac}" (se espera dd/mm/aaaa)`, idx: i });
-      }
+    // Missing date — informational, not critical
+    if (!r.fechaNac || r.fechaNac.trim() === '') {
+      issues.push({ type: 'info', msg: `${label}: sin fecha de nacimiento`, idx: i });
+    } else if (!validDateRegex.test(r.fechaNac)) {
+      issues.push({ type: 'warn', msg: `${label}: fecha con formato inusual "${r.fechaNac}" (se espera dd/mm/aaaa)`, idx: i });
     }
 
     // Missing name
@@ -2569,6 +2568,7 @@ function renderValidation() {
 
   const errors = issues.filter(i => i.type === 'error');
   const warns = issues.filter(i => i.type === 'warn');
+  const infos = issues.filter(i => i.type === 'info');
 
   if (issues.length === 0) {
     panel.style.display = 'block';
@@ -2577,12 +2577,17 @@ function renderValidation() {
     body.innerHTML = '<p style="color:var(--green);font-size:0.82rem;">No se encontraron problemas en los datos.</p>';
   } else {
     panel.style.display = 'block';
-    icon.textContent = errors.length > 0 ? '🔴' : '⚠';
-    title.innerHTML = `Validación de datos — <span class="${errors.length > 0 ? 'val-error' : 'val-warn'}">${errors.length} errores, ${warns.length} advertencias</span>`;
+    icon.textContent = errors.length > 0 ? '🔴' : warns.length > 0 ? '⚠' : 'ℹ';
+    const parts = [];
+    if (errors.length > 0) parts.push(`${errors.length} errores`);
+    if (warns.length > 0) parts.push(`${warns.length} advertencias`);
+    if (infos.length > 0) parts.push(`${infos.length} avisos`);
+    const severityClass = errors.length > 0 ? 'val-error' : warns.length > 0 ? 'val-warn' : 'val-info';
+    title.innerHTML = `Validación de datos — <span class="${severityClass}">${parts.join(', ')}</span>`;
 
     body.innerHTML = issues.map(issue => {
-      const cls = issue.type === 'error' ? 'val-error' : 'val-warn';
-      const ico = issue.type === 'error' ? '✕' : '⚠';
+      const cls = issue.type === 'error' ? 'val-error' : issue.type === 'warn' ? 'val-warn' : 'val-info';
+      const ico = issue.type === 'error' ? '✕' : issue.type === 'warn' ? '⚠' : 'ℹ';
       return `<div class="validation-item">
         <span class="val-icon ${cls}">${ico}</span>
         <span class="${cls}">${issue.msg}</span>
