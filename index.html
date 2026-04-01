@@ -1463,6 +1463,14 @@ document.getElementById('file-progress').addEventListener('change', async (e) =>
     updateStep2Btn();
 
     updateNextBtn();
+
+    // Si se cargó un archivo de progreso/exportación, ir directo al paso 3
+    // para continuar el trabajo sin pasar por la configuración nuevamente.
+    appMode = 'report';
+    document.getElementById('mode-report').classList.add('selected');
+    document.getElementById('mode-lists').classList.remove('selected');
+    renderStep3();
+    showStepById('step3');
   } catch(err) {
     alert('Error al leer el archivo: ' + err.message);
   }
