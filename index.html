@@ -731,11 +731,10 @@
     <div class="card" id="report-file-count-card" style="display:none;">
       <div class="card-title"><span class="icon">📦</span> Cantidad de archivos</div>
       <div style="display:flex;align-items:center;gap:0.8rem;">
-        <select id="report-file-count-select" style="padding:0.4rem 0.6rem;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:0.95rem;min-width:180px;">
-          <option value="1">1 archivo (todo junto)</option>
-        </select>
+        <input type="number" id="report-file-count-input" min="1" max="1" value="1" style="width:80px;padding:0.4rem 0.6rem;border-radius:6px;border:1px solid var(--border);background:var(--bg);color:var(--text);font-size:1rem;font-weight:600;text-align:center;">
+        <span id="report-file-count-info" style="font-size:0.85rem;color:var(--text-dim);"></span>
       </div>
-      <span style="color:var(--text-dim);font-size:0.75rem;">Elegí en cuántos archivos dividir la planilla. Los registros se distribuyen equitativamente.</span>
+      <span id="report-file-count-preview" style="color:var(--accent);font-size:0.8rem;font-weight:500;margin-top:0.3rem;display:block;"></span>
     </div>
 
     <div style="display:flex;gap:0.8rem;margin-top:1rem;flex-wrap:wrap;">
@@ -1629,56 +1628,20 @@ function renderStep3() {
     dlBtn.title = '';
   }
 
-  // Update report file count dropdown
-  // Teachers are repeated in every file, so max files is based on students only
-  const reportSelect = document.getElementById('report-file-count-select');
+  // Update report file count input
+  const reportInput = document.getElementById('report-file-count-input');
   const reportCard = document.getElementById('report-file-count-card');
   if (exportCount >= MIN_ROWS_PER_FILE) {
-    const studentsAvail = expStudents;
-    const teachersAvail = expTeachers;
-    // Each file gets all teachers + a slice of students, and must have between MIN and MAX rows
-    const slotsForStudents = MAX_ROWS_PER_FILE - teachersAvail;
-    let maxFiles;
-    if (slotsForStudents <= 0) {
-      maxFiles = 1; // more teachers than max rows, can't split
-    } else {
-      maxFiles = Math.max(1, Math.ceil(studentsAvail / slotsForStudents));
+    // Max files: limited so each file has at least 1 student + all teachers
+    const maxFiles = Math.max(1, expStudents);
+    reportInput.min = 1;
+    reportInput.max = maxFiles;
+    if (!reportInput.dataset.userSet) {
+      reportInput.value = fileCount;
     }
-    // Also ensure each file has at least MIN_ROWS_PER_FILE rows
-    // Each file will have: ceil(students/n) + teachers >= MIN_ROWS_PER_FILE
-    // So we also cap: ceil(students/n) + teachers <= MAX => n >= students / (MAX - teachers)
-    // And: ceil(students/n) + teachers >= MIN => n <= students / (MIN - teachers) (if MIN > teachers)
-    let minFiles = slotsForStudents > 0 ? Math.ceil(studentsAvail / slotsForStudents) : 1;
-    if (minFiles < 1) minFiles = 1;
-    if (maxFiles < minFiles) maxFiles = minFiles;
-
-    const currentVal = parseInt(reportSelect.value) || 1;
-    // Rebuild options
-    reportSelect.innerHTML = '';
-    for (let i = minFiles; i <= maxFiles; i++) {
-      const opt = document.createElement('option');
-      opt.value = i;
-      const studentsEach = Math.ceil(studentsAvail / i);
-      const totalEach = studentsEach + teachersAvail;
-      opt.textContent = i === 1
-        ? `1 archivo (${exportCount} registros)`
-        : `${i} archivos (~${totalEach} registros c/u, docentes repetidos)`;
-      reportSelect.appendChild(opt);
-    }
-    // If only one option and it's 1, still show it
-    if (reportSelect.options.length === 0) {
-      const opt = document.createElement('option');
-      opt.value = 1;
-      opt.textContent = `1 archivo (${exportCount} registros)`;
-      reportSelect.appendChild(opt);
-    }
-    // Restore previous selection or default
-    if (reportSelect.dataset.userSet && currentVal >= minFiles && currentVal <= maxFiles) {
-      reportSelect.value = currentVal;
-    } else {
-      reportSelect.value = Math.min(fileCount, maxFiles);
-      if (parseInt(reportSelect.value) < minFiles) reportSelect.value = minFiles;
-    }
+    if (parseInt(reportInput.value) > maxFiles) reportInput.value = maxFiles;
+    if (parseInt(reportInput.value) < 1) reportInput.value = 1;
+    updateFileCountInfo();
     reportCard.style.display = '';
   } else {
     reportCard.style.display = 'none';
@@ -1688,8 +1651,30 @@ function renderStep3() {
   renderValidation();
 }
 
-document.getElementById('report-file-count-select').addEventListener('change', () => {
-  document.getElementById('report-file-count-select').dataset.userSet = '1';
+function updateFileCountInfo() {
+  const input = document.getElementById('report-file-count-input');
+  const info = document.getElementById('report-file-count-info');
+  const preview = document.getElementById('report-file-count-preview');
+  const n = parseInt(input.value) || 1;
+  const rows = exportRows;
+  const students = rows.filter(r => r[6] !== 'DOCENTE').length;
+  const teachers = rows.filter(r => r[6] === 'DOCENTE').length;
+
+  if (n <= 1) {
+    info.textContent = `1 archivo con ${students + teachers} registros`;
+    preview.textContent = '';
+  } else {
+    const studentsEach = Math.ceil(students / n);
+    const totalEach = studentsEach + teachers;
+    info.textContent = `~${totalEach} registros por archivo (${studentsEach} est. + ${teachers} doc.)`;
+    preview.textContent = `Los ${teachers} docentes se repiten en cada archivo`;
+  }
+}
+
+document.getElementById('report-file-count-input').addEventListener('input', () => {
+  const input = document.getElementById('report-file-count-input');
+  input.dataset.userSet = '1';
+  updateFileCountInfo();
 });
 
 function toggleCiclo(cb) {
@@ -1973,7 +1958,7 @@ document.getElementById('btn-download').addEventListener('click', () => {
   const totalRows = rows.length;
 
   // Use the user-selected file count from the slider
-  let fileCount = parseInt(document.getElementById('report-file-count-select').value) || 1;
+  let fileCount = parseInt(document.getElementById('report-file-count-input').value) || 1;
 
   // Distribute students across files; teachers are repeated in every file
   const chunks = [];
