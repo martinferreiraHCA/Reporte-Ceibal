@@ -2566,14 +2566,6 @@ function runValidation() {
     .trim()
     .toUpperCase();
   const sanitizeName = (s) => (s || '').replace(/\s+/g, ' ').trim().toUpperCase();
-  const toSupportedName = (s) => (s || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^\w\s-]/g, ' ')
-    .replace(/_/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toUpperCase();
 
   allRecords.forEach((r, i) => {
     if (disabledRecords.has(i)) return;
@@ -2670,55 +2662,29 @@ function runValidation() {
   });
 
   // Name suggestions for near-duplicate staff names (possible typo or margin issue)
-  // IMPORTANT: keep this performant to avoid blocking Step 3 on large files.
   const staff = allRecords
     .map((r, i) => ({ r, i }))
     .filter(({ r, i }) => !disabledRecords.has(i) && r.relacion === 'DOCENTE');
-  const staffGroups = new Map();
-  staff.forEach(entry => {
-    const a = normalizeName(entry.r.primerApellido);
-    if (!a) return;
-    const key = a.slice(0, 4); // coarse bucketing by surname prefix
-    if (!staffGroups.has(key)) staffGroups.set(key, []);
-    staffGroups.get(key).push(entry);
-  });
-
-  const maxComparisons = 1200;
-  let comparisons = 0;
-
-  for (const group of staffGroups.values()) {
-    // Prevent quadratic explosion in very large groups
-    const maxInGroup = Math.min(group.length, 40);
-    for (let a = 0; a < maxInGroup; a++) {
-      for (let b = a + 1; b < maxInGroup; b++) {
-        if (comparisons++ > maxComparisons) break;
-        const ra = group[a].r, rb = group[b].r;
-        const aApe = normalizeName(ra.primerApellido);
-        const bApe = normalizeName(rb.primerApellido);
-        const aNom = normalizeName(ra.primerNombre);
-        const bNom = normalizeName(rb.primerNombre);
-        if (!aApe || !bApe || !aNom || !bNom) continue;
-
-        // Cheap pre-filters before levenshtein similarity
-        if (Math.abs(aNom.length - bNom.length) > 3) continue;
-        if (aNom[0] !== bNom[0]) continue;
-
-        const sameSurname = aApe === bApe || wordSimilarity(aApe, bApe) > 0.9;
-        const closeName = wordSimilarity(aNom, bNom) > 0.82;
-        const diffCI = ra.ci && rb.ci && ra.ci !== rb.ci;
-
-        if (sameSurname && closeName && diffCI && aNom !== bNom) {
-          issues.push({
-            type: 'warn',
-            msg: `Posible variación de nombre: "${ra.primerNombre} ${ra.primerApellido}" vs "${rb.primerNombre} ${rb.primerApellido}". Revisar ortografía/espacios.`,
-            idx: group[a].i,
-            field: 'primerNombre'
-          });
-        }
+  for (let a = 0; a < staff.length; a++) {
+    for (let b = a + 1; b < staff.length; b++) {
+      const ra = staff[a].r, rb = staff[b].r;
+      const aApe = normalizeName(ra.primerApellido);
+      const bApe = normalizeName(rb.primerApellido);
+      const aNom = normalizeName(ra.primerNombre);
+      const bNom = normalizeName(rb.primerNombre);
+      if (!aApe || !bApe || !aNom || !bNom) continue;
+      const sameSurname = aApe === bApe || wordSimilarity(aApe, bApe) > 0.88;
+      const closeName = wordSimilarity(aNom, bNom) > 0.75;
+      const diffCI = ra.ci && rb.ci && ra.ci !== rb.ci;
+      if (sameSurname && closeName && diffCI && aNom !== bNom) {
+        issues.push({
+          type: 'warn',
+          msg: `Posible variación de nombre: "${ra.primerNombre} ${ra.primerApellido}" vs "${rb.primerNombre} ${rb.primerApellido}". Revisar ortografía/espacios.`,
+          idx: staff[a].i,
+          field: 'primerNombre'
+        });
       }
-      if (comparisons > maxComparisons) break;
     }
-    if (comparisons > maxComparisons) break;
   }
 
   return issues;
@@ -2780,15 +2746,8 @@ function importStaffDatesFromCSV(csvText) {
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/\s+/g, ' ').trim().toUpperCase();
 
-  for (let li = 0; li < lines.length; li++) {
-    const line = lines[li];
-    let cols = [];
-    try {
-      cols = parseLine(line);
-    } catch (err) {
-      report.parseErrors.push(`Línea ${li + 1}: error al parsear columnas (${err.message})`);
-      continue;
-    }
+  for (const line of lines) {
+    const cols = parseLine(line);
     // Skip header-like or empty rows
     const firstCol = (cols[0] || '').toUpperCase().trim();
     if (!firstCol || firstCol === 'ACTIVO' || /^\d+$/.test(firstCol) && cols.filter(c => c).length < 3) continue;
@@ -2816,7 +2775,7 @@ function importStaffDatesFromCSV(csvText) {
       if (ciRaw) knownDatesByCI.set(ciRaw, parsedDate);
       if (apellido || nombre) knownDatesByName.set(`${apellido}|${nombre}`, parsedDate);
     }
-    csvEntries.push({ ci: ciRaw, date: parsedDate, nombre, apellido, raw: dateRaw, line: li + 1 });
+    csvEntries.push({ ci: ciRaw, date: parsedDate, nombre, apellido, raw: dateRaw });
   }
 
   // Second pass: complete CSV rows that had missing dates using repeated entries in the same document
