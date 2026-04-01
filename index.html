@@ -2566,14 +2566,6 @@ function runValidation() {
     .trim()
     .toUpperCase();
   const sanitizeName = (s) => (s || '').replace(/\s+/g, ' ').trim().toUpperCase();
-  const toSupportedName = (s) => (s || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^\w\s-]/g, ' ')
-    .replace(/_/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toUpperCase();
 
   allRecords.forEach((r, i) => {
     if (disabledRecords.has(i)) return;
@@ -2754,15 +2746,8 @@ function importStaffDatesFromCSV(csvText) {
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/\s+/g, ' ').trim().toUpperCase();
 
-  for (let li = 0; li < lines.length; li++) {
-    const line = lines[li];
-    let cols = [];
-    try {
-      cols = parseLine(line);
-    } catch (err) {
-      report.parseErrors.push(`Línea ${li + 1}: error al parsear columnas (${err.message})`);
-      continue;
-    }
+  for (const line of lines) {
+    const cols = parseLine(line);
     // Skip header-like or empty rows
     const firstCol = (cols[0] || '').toUpperCase().trim();
     if (!firstCol || firstCol === 'ACTIVO' || /^\d+$/.test(firstCol) && cols.filter(c => c).length < 3) continue;
@@ -2790,7 +2775,7 @@ function importStaffDatesFromCSV(csvText) {
       if (ciRaw) knownDatesByCI.set(ciRaw, parsedDate);
       if (apellido || nombre) knownDatesByName.set(`${apellido}|${nombre}`, parsedDate);
     }
-    csvEntries.push({ ci: ciRaw, date: parsedDate, nombre, apellido, raw: dateRaw, line: li + 1 });
+    csvEntries.push({ ci: ciRaw, date: parsedDate, nombre, apellido, raw: dateRaw });
   }
 
   // Second pass: complete CSV rows that had missing dates using repeated entries in the same document
