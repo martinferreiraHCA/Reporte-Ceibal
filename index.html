@@ -2563,44 +2563,116 @@ function parseSpanishDate(raw) {
 function importStaffDatesFromCSV(csvText) {
   const lines = csvText.split('\n').map(l => l.trim()).filter(l => l);
   let matched = 0;
+  const report = { parsed: 0, withCI: 0, withDate: 0, matched: 0, details: [] };
 
-  // Auto-detect header row to find CI and Fecha columns
-  let colCI = 5, colFecha = 6; // defaults for known format
+  // Auto-detect header row to find CI, Fecha, Nombre, Apellido columns
+  let colCI = 5, colFecha = 6, colNombre = 2, colApellido = 1;
   for (let li = 0; li < Math.min(lines.length, 10); li++) {
     const testCols = parseLine(lines[li]);
     for (let c = 0; c < testCols.length; c++) {
       const v = testCols[c].toUpperCase().trim();
       if (/^CI$|^C\.?I\.?$|^CEDULA|^CÉDULA|DOCUMENTO/.test(v)) colCI = c;
       if (/FECHA.*NAC|NAC.*FECHA|NACIMIENTO/.test(v)) colFecha = c;
+      if (/^NOMBRE/.test(v)) colNombre = c;
+      if (/^APELLIDO/.test(v)) colApellido = c;
     }
   }
 
+  // Build lookup of CSV data
+  const csvEntries = [];
   for (const line of lines) {
     const cols = parseLine(line);
+    // Skip header-like or empty rows
+    const firstCol = (cols[0] || '').toUpperCase().trim();
+    if (!firstCol || firstCol === 'ACTIVO' || /^\d+$/.test(firstCol) && cols.filter(c => c).length < 3) continue;
+
+    report.parsed++;
 
     const ciRaw = (cols[colCI] || '').replace(/[\-.\s]/g, '').replace(/\D/g, '');
-    const dateRaw = cols[colFecha] || '';
-    if (!ciRaw || ciRaw.length < 6 || !dateRaw) continue;
+    const dateRaw = (cols[colFecha] || '').trim();
+    const nombre = (cols[colNombre] || '').trim().toUpperCase();
+    const apellido = (cols[colApellido] || '').trim().toUpperCase();
+
+    if (ciRaw && ciRaw.length >= 6) report.withCI++;
 
     const parsedDate = parseSpanishDate(dateRaw) || cleanDate(dateRaw);
-    if (!parsedDate) continue;
+    if (parsedDate) report.withDate++;
 
-    // Match by CI: try exact match, also try without check digit (7 vs 8 digits)
-    allRecords.forEach(r => {
-      if (r.relacion !== 'DOCENTE') return;
-      if (r.fechaNac && r.fechaNac.trim() !== '') return;
-      // Compare: exact, or first 7 digits if lengths differ
-      const rci = r.ci;
-      const match = rci === ciRaw
-        || (rci.length === 7 && ciRaw.length === 8 && ciRaw.startsWith(rci))
-        || (rci.length === 8 && ciRaw.length === 7 && rci.startsWith(ciRaw));
-      if (match) {
-        r.fechaNac = parsedDate;
-        matched++;
-      }
-    });
+    if (parsedDate) {
+      csvEntries.push({ ci: ciRaw, date: parsedDate, nombre, apellido, raw: dateRaw });
+    }
   }
-  return matched;
+
+  // Helper to normalize CI for flexible matching
+  function normCI(ci) {
+    if (!ci) return '';
+    const d = ci.replace(/\D/g, '');
+    // Return both full and without-check-digit versions
+    return d;
+  }
+
+  // Build a map of all staff CIs for quick lookup
+  const staffMissing = allRecords
+    .map((r, i) => ({ r, i }))
+    .filter(({ r }) => r.relacion === 'DOCENTE' && (!r.fechaNac || r.fechaNac.trim() === ''));
+
+  for (const entry of csvEntries) {
+    if (!entry.date) continue;
+
+    let found = false;
+
+    // Strategy 1: exact CI match
+    for (const { r } of staffMissing) {
+      if (r.fechaNac && r.fechaNac.trim() !== '') continue; // already filled
+      if (r.ci === entry.ci) {
+        r.fechaNac = entry.date;
+        matched++;
+        report.details.push(`✓ CI ${entry.ci}: ${r.primerNombre} ${r.primerApellido} → ${entry.date}`);
+        found = true;
+        break;
+      }
+    }
+    if (found) continue;
+
+    // Strategy 2: CI without check digit (7 vs 8 digits)
+    for (const { r } of staffMissing) {
+      if (r.fechaNac && r.fechaNac.trim() !== '') continue;
+      const rci = r.ci, eci = entry.ci;
+      if ((rci.length === 7 && eci.length === 8 && eci.startsWith(rci))
+        || (rci.length === 8 && eci.length === 7 && rci.startsWith(eci))
+        || (rci.length >= 6 && eci.length >= 6 && rci.slice(0, 6) === eci.slice(0, 6))) {
+        r.fechaNac = entry.date;
+        matched++;
+        report.details.push(`✓ CI ~${entry.ci}→${rci}: ${r.primerNombre} ${r.primerApellido} → ${entry.date}`);
+        found = true;
+        break;
+      }
+    }
+    if (found) continue;
+
+    // Strategy 3: match by name (apellido)
+    if (entry.apellido) {
+      for (const { r } of staffMissing) {
+        if (r.fechaNac && r.fechaNac.trim() !== '') continue;
+        // Normalize: remove accents for comparison
+        const norm = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+        const rApellido = norm(r.primerApellido);
+        const eApellido = norm(entry.apellido.split(/\s+/)[0]); // first word of apellido
+        const rNombre = norm(r.primerNombre);
+        const eNombre = norm(entry.nombre.split(/\s+/)[0]);
+        if (rApellido === eApellido && rNombre === eNombre) {
+          r.fechaNac = entry.date;
+          matched++;
+          report.details.push(`✓ Nombre ${entry.nombre} ${entry.apellido}: ${r.primerNombre} ${r.primerApellido} → ${entry.date}`);
+          found = true;
+          break;
+        }
+      }
+    }
+  }
+
+  report.matched = matched;
+  return report;
 }
 
 function parseLine(line) {
@@ -2731,15 +2803,22 @@ function handleStaffDateCSV() {
     resultSpan.style.color = 'var(--red)';
     return;
   }
-  const matched = importStaffDatesFromCSV(textarea.value);
-  if (matched > 0) {
-    resultSpan.textContent = `✓ ${matched} fecha(s) importada(s) correctamente.`;
-    resultSpan.style.color = 'var(--green)';
+  const report = importStaffDatesFromCSV(textarea.value);
+  if (report.matched > 0) {
+    const detailText = report.details.join('\n');
+    resultSpan.innerHTML = `<span style="color:var(--green);">✓ ${report.matched} fecha(s) importada(s)</span>` +
+      ` <span style="color:var(--text-dim);">(${report.parsed} filas leídas, ${report.withCI} con CI, ${report.withDate} con fecha)</span>`;
     textarea.value = '';
     renderStep3();
   } else {
-    resultSpan.textContent = 'No se encontraron coincidencias por CI. Verificá el formato.';
-    resultSpan.style.color = 'var(--orange)';
+    // Show debug info to help user understand
+    const staffMissing = allRecords.filter(r => r.relacion === 'DOCENTE' && (!r.fechaNac || !r.fechaNac.trim()));
+    const staffCIs = staffMissing.map(r => r.ci).filter(c => c);
+    resultSpan.innerHTML = `<span style="color:var(--orange);">Sin coincidencias.</span>` +
+      `<br><span style="color:var(--text-dim);font-size:0.75rem;">` +
+      `CSV: ${report.parsed} filas, ${report.withCI} con CI, ${report.withDate} con fecha válida.<br>` +
+      `Docentes sin fecha: ${staffMissing.length} (CIs: ${staffCIs.slice(0, 5).join(', ')}${staffCIs.length > 5 ? '...' : ''})` +
+      `</span>`;
   }
 }
 </script>
