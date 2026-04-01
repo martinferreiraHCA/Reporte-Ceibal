@@ -2474,6 +2474,13 @@ function runValidation() {
   const specialCharRegex = /[üÜöÖäÄëËïÏ''´`']/;
   const validCiRegex = /^\d{6,8}$/;
   const validDateRegex = /^\d{2}\/\d{2}\/\d{4}$/;
+  const normalizeName = (s) => (s || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase();
+  const sanitizeName = (s) => (s || '').replace(/\s+/g, ' ').trim().toUpperCase();
 
   allRecords.forEach((r, i) => {
     if (disabledRecords.has(i)) return;
@@ -2499,6 +2506,22 @@ function runValidation() {
     }
     if (!r.primerApellido || r.primerApellido.trim() === '') {
       issues.push({ type: 'error', msg: `${label}: falta primer apellido`, idx: i });
+    }
+    if (r.primerNombre && r.primerNombre !== sanitizeName(r.primerNombre)) {
+      issues.push({
+        type: 'warn',
+        msg: `${label}: nombre con espacios sobrantes. Sugerido: "${sanitizeName(r.primerNombre)}"`,
+        idx: i,
+        field: 'primerNombre'
+      });
+    }
+    if (r.primerApellido && r.primerApellido !== sanitizeName(r.primerApellido)) {
+      issues.push({
+        type: 'warn',
+        msg: `${label}: apellido con espacios sobrantes. Sugerido: "${sanitizeName(r.primerApellido)}"`,
+        idx: i,
+        field: 'primerApellido'
+      });
     }
 
     // Dieresis/crema or apostrophes in name (Ceibal is sensitive to these)
@@ -2541,6 +2564,32 @@ function runValidation() {
     }
   });
 
+  // Name suggestions for near-duplicate staff names (possible typo or margin issue)
+  const staff = allRecords
+    .map((r, i) => ({ r, i }))
+    .filter(({ r, i }) => !disabledRecords.has(i) && r.relacion === 'DOCENTE');
+  for (let a = 0; a < staff.length; a++) {
+    for (let b = a + 1; b < staff.length; b++) {
+      const ra = staff[a].r, rb = staff[b].r;
+      const aApe = normalizeName(ra.primerApellido);
+      const bApe = normalizeName(rb.primerApellido);
+      const aNom = normalizeName(ra.primerNombre);
+      const bNom = normalizeName(rb.primerNombre);
+      if (!aApe || !bApe || !aNom || !bNom) continue;
+      const sameSurname = aApe === bApe || wordSimilarity(aApe, bApe) > 0.88;
+      const closeName = wordSimilarity(aNom, bNom) > 0.75;
+      const diffCI = ra.ci && rb.ci && ra.ci !== rb.ci;
+      if (sameSurname && closeName && diffCI && aNom !== bNom) {
+        issues.push({
+          type: 'warn',
+          msg: `Posible variación de nombre: "${ra.primerNombre} ${ra.primerApellido}" vs "${rb.primerNombre} ${rb.primerApellido}". Revisar ortografía/espacios.`,
+          idx: staff[a].i,
+          field: 'primerNombre'
+        });
+      }
+    }
+  }
+
   return issues;
 }
 
@@ -2561,7 +2610,11 @@ function parseSpanishDate(raw) {
 }
 
 function importStaffDatesFromCSV(csvText) {
-  const lines = csvText.split('\n').map(l => l.trim()).filter(l => l);
+  const normalizedInput = (csvText || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/\\n/g, '\n');
+  const lines = normalizedInput.split('\n').map(l => l.trim()).filter(l => l);
   let matched = 0;
   const report = { parsed: 0, withCI: 0, withDate: 0, matched: 0, details: [] };
 
@@ -2580,6 +2633,12 @@ function importStaffDatesFromCSV(csvText) {
 
   // Build lookup of CSV data
   const csvEntries = [];
+  const knownDatesByCI = new Map();
+  const knownDatesByName = new Map();
+  const normName = (v) => (v || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ').trim().toUpperCase();
+
   for (const line of lines) {
     const cols = parseLine(line);
     // Skip header-like or empty rows
@@ -2590,8 +2649,8 @@ function importStaffDatesFromCSV(csvText) {
 
     const ciRaw = (cols[colCI] || '').replace(/[\-.\s]/g, '').replace(/\D/g, '');
     const dateRaw = (cols[colFecha] || '').trim();
-    const nombre = (cols[colNombre] || '').trim().toUpperCase();
-    const apellido = (cols[colApellido] || '').trim().toUpperCase();
+    const nombre = normName(cols[colNombre] || '');
+    const apellido = normName(cols[colApellido] || '');
 
     if (ciRaw && ciRaw.length >= 6) report.withCI++;
 
@@ -2599,9 +2658,24 @@ function importStaffDatesFromCSV(csvText) {
     if (parsedDate) report.withDate++;
 
     if (parsedDate) {
-      csvEntries.push({ ci: ciRaw, date: parsedDate, nombre, apellido, raw: dateRaw });
+      if (ciRaw) knownDatesByCI.set(ciRaw, parsedDate);
+      if (apellido || nombre) knownDatesByName.set(`${apellido}|${nombre}`, parsedDate);
     }
+    csvEntries.push({ ci: ciRaw, date: parsedDate, nombre, apellido, raw: dateRaw });
   }
+
+  // Second pass: complete CSV rows that had missing dates using repeated entries in the same document
+  csvEntries.forEach(entry => {
+    if (entry.date) return;
+    if (entry.ci && knownDatesByCI.has(entry.ci)) {
+      entry.date = knownDatesByCI.get(entry.ci);
+      return;
+    }
+    const key = `${entry.apellido}|${entry.nombre}`;
+    if (knownDatesByName.has(key)) {
+      entry.date = knownDatesByName.get(key);
+    }
+  });
 
   // Helper to normalize CI for flexible matching
   function normCI(ci) {
@@ -2676,13 +2750,22 @@ function importStaffDatesFromCSV(csvText) {
 }
 
 function parseLine(line) {
-  // Auto-detect delimiter: if line has tabs, use tabs; otherwise use commas
-  const delimiter = line.includes('\t') ? '\t' : ',';
+  // Auto-detect delimiter: prioritize ; then tab then comma
+  const delimiter = line.includes(';') ? ';' : (line.includes('\t') ? '\t' : ',');
   const cols = [];
   let current = '', inQuotes = false;
   for (let i = 0; i < line.length; i++) {
     const ch = line[i];
-    if (ch === '"') { inQuotes = !inQuotes; continue; }
+    if (ch === '"') {
+      // Handle escaped quotes ("")
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
     if (ch === delimiter && !inQuotes) { cols.push(current.trim()); current = ''; continue; }
     current += ch;
   }
