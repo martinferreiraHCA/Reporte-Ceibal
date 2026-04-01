@@ -484,6 +484,67 @@
     background: var(--accent-glow); color: var(--accent);
   }
 
+  .import-report-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 0.6rem;
+    margin-bottom: 0.8rem;
+  }
+  .import-report-card {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.6rem;
+  }
+  .import-report-card .label {
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .import-report-card .value {
+    font-size: 1rem;
+    font-weight: 700;
+    margin-top: 0.2rem;
+  }
+  .import-report-card.ok .value { color: var(--green); }
+  .import-report-card.warn .value { color: var(--orange); }
+  .import-report-card.err .value { color: var(--red); }
+  .import-report-list {
+    max-height: 220px;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin: 0.5rem 0 0.9rem;
+  }
+  .import-report-row {
+    display: grid;
+    grid-template-columns: 90px 1.2fr 1fr 1fr 1fr;
+    gap: 0.5rem;
+    padding: 0.45rem 0.6rem;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.78rem;
+    align-items: center;
+  }
+  .import-report-row.header {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--surface2);
+    font-weight: 700;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 0.7rem;
+  }
+  .import-report-row:last-child { border-bottom: none; }
+  .import-error-item {
+    padding: 0.45rem 0.55rem;
+    font-size: 0.78rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .import-error-item:last-child { border-bottom: none; }
+
   /* Validation panel */
   .validation-panel {
     border: 1px solid var(--border); border-radius: var(--radius);
@@ -805,6 +866,21 @@ Emilia Delgado 100%"></textarea>
   </div>
 </div>
 
+<!-- Import Report Modal -->
+<div class="modal-overlay" id="import-report-modal">
+  <div class="modal modal-wide">
+    <button class="close-btn" onclick="closeImportReportModal()">✕</button>
+    <h3>Resultado de importación y comparación</h3>
+    <p style="color:var(--text-dim);font-size:0.82rem;margin-bottom:0.6rem;">
+      Compara datos anteriores vs nuevos y muestra errores específicos detectados.
+    </p>
+    <div id="import-report-content"></div>
+    <div style="display:flex;gap:0.5rem;">
+      <button class="btn btn-primary" onclick="closeImportReportModal()">Cerrar</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // ===== Library checks =====
 if (typeof XLSX === 'undefined') {
@@ -826,6 +902,7 @@ let activeCiclos = new Set();    // checked ciclos
 let activeGrados = new Set();    // checked grados
 let filtersVisible = false;
 let schoolName = '';
+let lastImportReport = null;
 
 // ===== Date cleaning utility =====
 // Handles: blank placeholders like '  /  /    ', 2-digit years, and normalizes to dd/mm/aaaa
@@ -1392,6 +1469,14 @@ document.getElementById('file-progress').addEventListener('change', async (e) =>
     updateStep2Btn();
 
     updateNextBtn();
+
+    // Si se cargó un archivo de progreso/exportación, ir directo al paso 3
+    // para continuar el trabajo sin pasar por la configuración nuevamente.
+    appMode = 'report';
+    document.getElementById('mode-report').classList.add('selected');
+    document.getElementById('mode-lists').classList.remove('selected');
+    renderStep3();
+    showStepById('step3');
   } catch(err) {
     alert('Error al leer el archivo: ' + err.message);
   }
@@ -2478,11 +2563,29 @@ function toggleValidation() {
   document.getElementById('validation-toggle-hint').textContent = validationOpen ? 'clic para colapsar' : 'clic para expandir';
 }
 
+function toSupportedName(value) {
+  return (value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\w\s-]/g, ' ')
+    .replace(/_/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase();
+}
+
 function runValidation() {
   const issues = [];
   const specialCharRegex = /[üÜöÖäÄëËïÏ''´`']/;
   const validCiRegex = /^\d{6,8}$/;
   const validDateRegex = /^\d{2}\/\d{2}\/\d{4}$/;
+  const normalizeName = (s) => (s || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase();
+  const sanitizeName = (s) => (s || '').replace(/\s+/g, ' ').trim().toUpperCase();
 
   allRecords.forEach((r, i) => {
     if (disabledRecords.has(i)) return;
@@ -2509,6 +2612,22 @@ function runValidation() {
     if (!r.primerApellido || r.primerApellido.trim() === '') {
       issues.push({ type: 'error', msg: `${label}: falta primer apellido`, idx: i });
     }
+    if (r.primerNombre && r.primerNombre !== sanitizeName(r.primerNombre)) {
+      issues.push({
+        type: 'warn',
+        msg: `${label}: nombre con espacios sobrantes. Sugerido: "${sanitizeName(r.primerNombre)}"`,
+        idx: i,
+        field: 'primerNombre'
+      });
+    }
+    if (r.primerApellido && r.primerApellido !== sanitizeName(r.primerApellido)) {
+      issues.push({
+        type: 'warn',
+        msg: `${label}: apellido con espacios sobrantes. Sugerido: "${sanitizeName(r.primerApellido)}"`,
+        idx: i,
+        field: 'primerApellido'
+      });
+    }
 
     // Dieresis/crema or apostrophes in name (Ceibal is sensitive to these)
     if (specialCharRegex.test(r.primerNombre)) {
@@ -2516,6 +2635,18 @@ function runValidation() {
     }
     if (specialCharRegex.test(r.primerApellido)) {
       issues.push({ type: 'warn', msg: `${label}: apellido contiene diéresis o apóstrofe "${r.primerApellido}"`, idx: i, field: 'primerApellido' });
+    }
+    if (r.primerApellido) {
+      const suggestedApellido = toSupportedName(r.primerApellido);
+      if (suggestedApellido && suggestedApellido !== r.primerApellido) {
+        issues.push({
+          type: 'warn',
+          msg: `${label}: apellido con caracteres potencialmente no soportados. Sugerido: "${suggestedApellido}"`,
+          idx: i,
+          field: 'primerApellido',
+          suggested: suggestedApellido
+        });
+      }
     }
 
     // Missing ciclo or grado
@@ -2550,6 +2681,32 @@ function runValidation() {
     }
   });
 
+  // Name suggestions for near-duplicate staff names (possible typo or margin issue)
+  const staff = allRecords
+    .map((r, i) => ({ r, i }))
+    .filter(({ r, i }) => !disabledRecords.has(i) && r.relacion === 'DOCENTE');
+  for (let a = 0; a < staff.length; a++) {
+    for (let b = a + 1; b < staff.length; b++) {
+      const ra = staff[a].r, rb = staff[b].r;
+      const aApe = normalizeName(ra.primerApellido);
+      const bApe = normalizeName(rb.primerApellido);
+      const aNom = normalizeName(ra.primerNombre);
+      const bNom = normalizeName(rb.primerNombre);
+      if (!aApe || !bApe || !aNom || !bNom) continue;
+      const sameSurname = aApe === bApe || wordSimilarity(aApe, bApe) > 0.88;
+      const closeName = wordSimilarity(aNom, bNom) > 0.75;
+      const diffCI = ra.ci && rb.ci && ra.ci !== rb.ci;
+      if (sameSurname && closeName && diffCI && aNom !== bNom) {
+        issues.push({
+          type: 'warn',
+          msg: `Posible variación de nombre: "${ra.primerNombre} ${ra.primerApellido}" vs "${rb.primerNombre} ${rb.primerApellido}". Revisar ortografía/espacios.`,
+          idx: staff[a].i,
+          field: 'primerNombre'
+        });
+      }
+    }
+  }
+
   return issues;
 }
 
@@ -2568,24 +2725,24 @@ function parseSpanishDate(raw) {
   return `${day}/${String(month).padStart(2, '0')}/${m[3]}`;
 }
 
-function parseLine(line) {
-  const delimiter = line.includes('\t') ? '\t' : ',';
-  const cols = [];
-  let current = '', inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === '"') { inQuotes = !inQuotes; continue; }
-    if (ch === delimiter && !inQuotes) { cols.push(current.trim()); current = ''; continue; }
-    current += ch;
-  }
-  cols.push(current.trim());
-  return cols;
-}
-
-// Normalize string for fuzzy comparison: remove accents, uppercase, trim
-function normStr(s) {
-  return (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim();
-}
+function importStaffDatesFromCSV(csvText) {
+  const normalizedInput = (csvText || '')
+    .replace(/\r\n/g, '\n')
+    .replace(/\r/g, '\n')
+    .replace(/\\n/g, '\n');
+  const lines = normalizedInput.split('\n').map(l => l.trim()).filter(l => l);
+  let matched = 0;
+  const report = {
+    parsed: 0,
+    withCI: 0,
+    withDate: 0,
+    matched: 0,
+    details: [],
+    updatedRows: [],
+    unmatchedRows: [],
+    parseErrors: [],
+    status: 'ok'
+  };
 
 // Parse CSV into structured entries with auto-detected columns
 function parseStaffCSV(csvText) {
@@ -2604,70 +2761,68 @@ function parseStaffCSV(csvText) {
     }
   }
 
-  const entries = [];
+  // Build lookup of CSV data
+  const csvEntries = [];
+  const knownDatesByCI = new Map();
+  const knownDatesByName = new Map();
+  const normName = (v) => (v || '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ').trim().toUpperCase();
+
   for (const line of lines) {
     const cols = parseLine(line);
     const firstCol = (cols[0] || '').toUpperCase().trim();
     // Skip empty, header, and metadata rows
     if (!firstCol || firstCol === 'ACTIVO' || (/^\d+$/.test(firstCol) && cols.filter(c => c).length < 3)) continue;
 
-    const ci = (cols[colCI] || '').replace(/[\-.\s]/g, '').replace(/\D/g, '');
+    report.parsed++;
+    const maxRequired = Math.max(colCI, colFecha, colNombre, colApellido);
+    if (cols.length <= maxRequired) {
+      report.parseErrors.push(`Línea ${li + 1}: columnas insuficientes (esperadas hasta índice ${maxRequired}, recibidas ${cols.length}).`);
+    }
+
+    const ciRaw = (cols[colCI] || '').replace(/[\-.\s]/g, '').replace(/\D/g, '');
     const dateRaw = (cols[colFecha] || '').trim();
-    const nombre = (cols[colNombre] || '').trim();
-    const apellido = (cols[colApellido] || '').trim();
-    const date = parseSpanishDate(dateRaw) || cleanDate(dateRaw);
+    const nombre = normName(cols[colNombre] || '');
+    const apellido = normName(cols[colApellido] || '');
 
     entries.push({ ci, date, nombre, apellido, dateRaw });
   }
   return entries;
 }
 
-// Find best CSV candidate for a given record using multiple strategies
-function findCSVCandidates(record, csvEntries) {
-  const rci = record.ci || '';
-  const rNorm = normStr(record.primerApellido);
-  const rNomNorm = normStr(record.primerNombre);
-  const candidates = [];
-
-  for (const entry of csvEntries) {
-    if (!entry.date) continue;
-    let score = 0;
-    let reason = '';
-
-    // CI matching
-    if (entry.ci && rci) {
-      if (entry.ci === rci) { score += 100; reason = 'CI exacto'; }
-      else if (entry.ci.length >= 7 && rci.length >= 7 && entry.ci.slice(0, 7) === rci.slice(0, 7)) { score += 80; reason = 'CI parcial (7 dig)'; }
-      else if (entry.ci.length >= 6 && rci.length >= 6 && entry.ci.slice(0, 6) === rci.slice(0, 6)) { score += 60; reason = 'CI parcial (6 dig)'; }
+    const parsedDate = parseSpanishDate(dateRaw) || cleanDate(dateRaw);
+    if (parsedDate) report.withDate++;
+    if (dateRaw && !parsedDate) {
+      report.parseErrors.push(`Línea ${li + 1}: fecha inválida "${dateRaw}" para ${nombre || '(sin nombre)'} ${apellido || ''}.`);
     }
 
-    // Name matching
-    const eApNorm = normStr(entry.apellido.split(/\s+/)[0]);
-    const eNomNorm = normStr(entry.nombre.split(/\s+/)[0]);
-
-    if (rNorm && eApNorm) {
-      if (rNorm === eApNorm && rNomNorm === eNomNorm) { score += 90; reason = reason ? reason + ' + nombre completo' : 'Nombre completo'; }
-      else if (rNorm === eApNorm) { score += 40; reason = reason ? reason + ' + apellido' : 'Solo apellido'; }
-      else if (rNomNorm === eNomNorm && rNomNorm.length > 2) { score += 20; reason = reason ? reason + ' + nombre' : 'Solo nombre'; }
+    if (parsedDate) {
+      if (ciRaw) knownDatesByCI.set(ciRaw, parsedDate);
+      if (apellido || nombre) knownDatesByName.set(`${apellido}|${nombre}`, parsedDate);
     }
-
-    if (score > 0) {
-      candidates.push({ ...entry, score, reason });
-    }
+    csvEntries.push({ ci: ciRaw, date: parsedDate, nombre, apellido, raw: dateRaw });
   }
 
-  return candidates.sort((a, b) => b.score - a.score);
-}
+  // Second pass: complete CSV rows that had missing dates using repeated entries in the same document
+  csvEntries.forEach(entry => {
+    if (entry.date) return;
+    if (entry.ci && knownDatesByCI.has(entry.ci)) {
+      entry.date = knownDatesByCI.get(entry.ci);
+      return;
+    }
+    const key = `${entry.apellido}|${entry.nombre}`;
+    if (knownDatesByName.has(key)) {
+      entry.date = knownDatesByName.get(key);
+    }
+  });
 
-// Global state for pending CSV matches
-let pendingCSVMatches = [];
-
-function handleStaffDateCSV() {
-  const textarea = document.getElementById('staff-dates-csv');
-  const resultDiv = document.getElementById('staff-csv-result');
-  if (!textarea || !textarea.value.trim()) {
-    resultDiv.innerHTML = '<span style="color:var(--red);">Pegá el CSV primero.</span>';
-    return;
+  // Helper to normalize CI for flexible matching
+  function normCI(ci) {
+    if (!ci) return '';
+    const d = ci.replace(/\D/g, '');
+    // Return both full and without-check-digit versions
+    return d;
   }
 
   const csvEntries = parseStaffCSV(textarea.value);
@@ -2680,119 +2835,125 @@ function handleStaffDateCSV() {
     return;
   }
 
-  const autoMatched = [];
-  const needsReview = [];
+    let found = false;
 
-  for (const { r, i } of staffMissing) {
-    const candidates = findCSVCandidates(r, csvEntries);
-    if (candidates.length > 0 && candidates[0].score >= 90) {
-      // Auto-match (high confidence)
-      autoMatched.push({ record: r, idx: i, match: candidates[0] });
-    } else {
-      // Needs manual review
-      needsReview.push({ record: r, idx: i, candidates: candidates.slice(0, 3) });
+    // Strategy 1: exact CI match
+    for (const { r, i } of staffMissing) {
+      if (r.fechaNac && r.fechaNac.trim() !== '') continue; // already filled
+      if (r.ci === entry.ci) {
+        const oldDate = r.fechaNac || '';
+        r.fechaNac = entry.date;
+        matched++;
+        report.details.push(`✓ CI ${entry.ci}: ${r.primerNombre} ${r.primerApellido} → ${entry.date}`);
+        report.updatedRows.push({
+          idx: i,
+          relation: r.relacion,
+          name: `${r.primerNombre} ${r.primerApellido}`.trim(),
+          ci: r.ci,
+          oldDate: oldDate || '(vacío)',
+          newDate: r.fechaNac,
+          method: 'CI exacta',
+          line: entry.line
+        });
+        found = true;
+        break;
+      }
+    }
+    if (found) continue;
+
+    // Strategy 2: CI without check digit (7 vs 8 digits)
+    for (const { r, i } of staffMissing) {
+      if (r.fechaNac && r.fechaNac.trim() !== '') continue;
+      const rci = r.ci, eci = entry.ci;
+      if ((rci.length === 7 && eci.length === 8 && eci.startsWith(rci))
+        || (rci.length === 8 && eci.length === 7 && rci.startsWith(eci))
+        || (rci.length >= 6 && eci.length >= 6 && rci.slice(0, 6) === eci.slice(0, 6))) {
+        const oldDate = r.fechaNac || '';
+        r.fechaNac = entry.date;
+        matched++;
+        report.details.push(`✓ CI ~${entry.ci}→${rci}: ${r.primerNombre} ${r.primerApellido} → ${entry.date}`);
+        report.updatedRows.push({
+          idx: i,
+          relation: r.relacion,
+          name: `${r.primerNombre} ${r.primerApellido}`.trim(),
+          ci: r.ci,
+          oldDate: oldDate || '(vacío)',
+          newDate: r.fechaNac,
+          method: 'CI aproximada',
+          line: entry.line
+        });
+        found = true;
+        break;
+      }
+    }
+    if (found) continue;
+
+    // Strategy 3: match by name (apellido)
+    if (entry.apellido) {
+      for (const { r, i } of staffMissing) {
+        if (r.fechaNac && r.fechaNac.trim() !== '') continue;
+        // Normalize: remove accents for comparison
+        const norm = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+        const rApellido = norm(r.primerApellido);
+        const eApellido = norm(entry.apellido.split(/\s+/)[0]); // first word of apellido
+        const rNombre = norm(r.primerNombre);
+        const eNombre = norm(entry.nombre.split(/\s+/)[0]);
+        if (rApellido === eApellido && rNombre === eNombre) {
+          const oldDate = r.fechaNac || '';
+          r.fechaNac = entry.date;
+          matched++;
+          report.details.push(`✓ Nombre ${entry.nombre} ${entry.apellido}: ${r.primerNombre} ${r.primerApellido} → ${entry.date}`);
+          report.updatedRows.push({
+            idx: i,
+            relation: r.relacion,
+            name: `${r.primerNombre} ${r.primerApellido}`.trim(),
+            ci: r.ci,
+            oldDate: oldDate || '(vacío)',
+            newDate: r.fechaNac,
+            method: 'Nombre + apellido',
+            line: entry.line
+          });
+          found = true;
+          break;
+        }
+      }
+    }
+    if (!found) {
+      report.unmatchedRows.push({
+        line: entry.line,
+        ci: entry.ci || '(sin CI)',
+        name: `${entry.nombre || '(sin nombre)'} ${entry.apellido || ''}`.trim(),
+        date: entry.date,
+        reason: 'Sin coincidencia en docentes con fecha faltante.'
+      });
     }
   }
 
-  // Apply auto-matches immediately
-  autoMatched.forEach(({ record, match }) => {
-    record.fechaNac = match.date;
-  });
-
-  // Build result UI
-  let html = '';
-  const entriesWithDate = csvEntries.filter(e => e.date).length;
-  html += `<div style="font-size:0.8rem;color:var(--text-dim);margin-bottom:0.5rem;">CSV: ${csvEntries.length} personas, ${entriesWithDate} con fecha.</div>`;
-
-  if (autoMatched.length > 0) {
-    html += `<div style="color:var(--green);font-size:0.85rem;font-weight:600;margin-bottom:0.4rem;">✓ ${autoMatched.length} fecha(s) asignada(s) automáticamente:</div>`;
-    autoMatched.forEach(({ record, match }) => {
-      html += `<div style="font-size:0.78rem;color:var(--text-dim);margin-left:0.5rem;">
-        - ${record.primerNombre} ${record.primerApellido} → ${match.date} (${match.reason})</div>`;
-    });
-  }
-
-  if (needsReview.length > 0) {
-    // Store for later use by confirmCSVMatch
-    pendingCSVMatches = needsReview;
-    html += `<div style="color:var(--orange);font-size:0.85rem;font-weight:600;margin:0.6rem 0 0.4rem;">
-      ${needsReview.length} docente(s) sin coincidencia segura — revisá manualmente:</div>`;
-    needsReview.forEach(({ record, idx, candidates }, ni) => {
-      html += `<div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.5rem;margin-bottom:0.5rem;">
-        <div style="font-size:0.82rem;font-weight:600;color:var(--text);">
-          ${record.primerNombre} ${record.primerApellido} <span style="color:var(--text-dim);font-weight:400;">(CI: ${record.ci})</span>
-        </div>`;
-      if (candidates.length > 0) {
-        html += `<div style="font-size:0.75rem;color:var(--text-dim);margin:0.3rem 0 0.2rem;">Sugerencias del CSV:</div>`;
-        candidates.forEach((c, ci) => {
-          const selected = ci === 0 ? 'checked' : '';
-          html += `<label style="display:flex;align-items:center;gap:0.4rem;font-size:0.8rem;margin-bottom:0.2rem;cursor:pointer;">
-            <input type="radio" name="csv-match-${ni}" value="${ci}" ${selected}>
-            <span>${c.nombre} ${c.apellido} (CI: ${c.ci || 'sin CI'}) → <strong>${c.date}</strong></span>
-            <span style="color:var(--text-dim);font-size:0.7rem;">(${c.reason}, score: ${c.score})</span>
-          </label>`;
-        });
-        html += `<label style="display:flex;align-items:center;gap:0.4rem;font-size:0.8rem;margin-bottom:0.2rem;cursor:pointer;">
-          <input type="radio" name="csv-match-${ni}" value="manual">
-          <span>Escribir fecha manualmente:</span>
-          <input type="text" id="csv-manual-date-${ni}" placeholder="dd/mm/aaaa" style="width:100px;padding:0.2rem 0.4rem;border:1px solid var(--border);border-radius:4px;font-size:0.8rem;background:var(--bg);color:var(--text);">
-        </label>`;
-      } else {
-        html += `<div style="font-size:0.78rem;color:var(--text-dim);margin:0.3rem 0;">No se encontraron sugerencias en el CSV.</div>
-          <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.8rem;cursor:pointer;">
-            <span>Fecha manual:</span>
-            <input type="text" id="csv-manual-date-${ni}" placeholder="dd/mm/aaaa" style="width:100px;padding:0.2rem 0.4rem;border:1px solid var(--border);border-radius:4px;font-size:0.8rem;background:var(--bg);color:var(--text);">
-          </label>`;
-      }
-      html += `<label style="display:flex;align-items:center;gap:0.4rem;font-size:0.8rem;margin-top:0.2rem;cursor:pointer;color:var(--text-dim);">
-        <input type="radio" name="csv-match-${ni}" value="skip"> Ignorar (dejar sin fecha)
-      </label></div>`;
-    });
-    html += `<button onclick="confirmCSVMatches()" class="btn btn-primary" style="margin-top:0.4rem;font-size:0.82rem;padding:0.4rem 1rem;">
-      Confirmar asignaciones</button>`;
-  }
-
-  if (autoMatched.length > 0 && needsReview.length === 0) {
-    textarea.value = '';
-    renderStep3();
-    return;
-  }
-
-  resultDiv.innerHTML = html;
+  report.matched = matched;
+  if (report.parseErrors.length > 0) report.status = 'warn';
+  if (report.matched === 0 && report.parseErrors.length > 0) report.status = 'error';
+  return report;
 }
 
-function confirmCSVMatches() {
-  let applied = 0;
-  pendingCSVMatches.forEach(({ record, idx, candidates }, ni) => {
-    const selected = document.querySelector(`input[name="csv-match-${ni}"]:checked`);
-    if (!selected) return;
-    const val = selected.value;
-
-    if (val === 'skip') return;
-    if (val === 'manual') {
-      const manualInput = document.getElementById(`csv-manual-date-${ni}`);
-      const dateVal = manualInput ? manualInput.value.trim() : '';
-      const parsed = cleanDate(dateVal);
-      if (parsed) { record.fechaNac = parsed; applied++; }
-      return;
+function parseLine(line) {
+  // Auto-detect delimiter: prioritize ; then tab then comma
+  const delimiter = line.includes(';') ? ';' : (line.includes('\t') ? '\t' : ',');
+  const cols = [];
+  let current = '', inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      // Handle escaped quotes ("")
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
     }
-
-    const ci = parseInt(val);
-    if (!isNaN(ci) && candidates[ci]) {
-      record.fechaNac = candidates[ci].date;
-      applied++;
-    }
-  });
-
-  pendingCSVMatches = [];
-  const resultDiv = document.getElementById('staff-csv-result');
-  if (applied > 0) {
-    resultDiv.innerHTML = `<span style="color:var(--green);font-weight:600;">✓ ${applied} fecha(s) asignada(s) manualmente.</span>`;
-    const textarea = document.getElementById('staff-dates-csv');
-    if (textarea) textarea.value = '';
-    renderStep3();
-  } else {
-    resultDiv.innerHTML = `<span style="color:var(--text-dim);">No se asignaron fechas.</span>`;
+    if (ch === delimiter && !inQuotes) { cols.push(current.trim()); current = ''; continue; }
+    current += ch;
   }
 }
 
@@ -2858,7 +3019,13 @@ function renderValidation() {
         <input type="text" value="${(val || '').replace(/"/g, '&quot;')}"
           style="flex:1;padding:0.3rem 0.5rem;border:1px solid var(--orange);border-radius:4px;background:var(--bg);color:var(--text);font-size:0.85rem;"
           onchange="allRecords[${issue.idx}].${issue.field} = this.value.toUpperCase(); renderStep3();">
+        ${issue.suggested ? `<button class="btn btn-sm btn-outline" onclick="allRecords[${issue.idx}].${issue.field}='${issue.suggested.replace(/'/g, "\\'")}'; renderStep3();" title="Aplicar sugerencia automática">
+          Aplicar sugerencia
+        </button>` : ''}
       </div>`;
+      if (issue.suggested) {
+        html += `<div style="margin:-0.25rem 0 0.45rem 200px;font-size:0.76rem;color:var(--orange);">Sugerido: ${issue.suggested}</div>`;
+      }
     });
     html += `</div>`;
   }
@@ -2910,9 +3077,102 @@ function applyManualDate(idx) {
     input.style.borderColor = 'var(--red)';
     return;
   }
-  allRecords[idx].fechaNac = parsed;
-  renderStep3();
+  const report = importStaffDatesFromCSV(textarea.value);
+  lastImportReport = report;
+  if (report.matched > 0) {
+    resultSpan.innerHTML = `<span style="color:var(--green);">✓ ${report.matched} fecha(s) importada(s)</span>` +
+      ` <span style="color:var(--text-dim);">(${report.parsed} filas leídas, ${report.withCI} con CI, ${report.withDate} con fecha, ${report.parseErrors.length} errores)</span>`;
+    textarea.value = '';
+    renderStep3();
+    openImportReportModal();
+  } else {
+    // Show debug info to help user understand
+    const staffMissing = allRecords.filter(r => r.relacion === 'DOCENTE' && (!r.fechaNac || !r.fechaNac.trim()));
+    const staffCIs = staffMissing.map(r => r.ci).filter(c => c);
+    resultSpan.innerHTML = `<span style="color:var(--orange);">Sin coincidencias.</span>` +
+      `<br><span style="color:var(--text-dim);font-size:0.75rem;">` +
+      `CSV: ${report.parsed} filas, ${report.withCI} con CI, ${report.withDate} con fecha válida, ${report.parseErrors.length} errores.<br>` +
+      `Docentes sin fecha: ${staffMissing.length} (CIs: ${staffCIs.slice(0, 5).join(', ')}${staffCIs.length > 5 ? '...' : ''})` +
+      `</span>`;
+    openImportReportModal();
+  }
 }
+
+function escapeHtml(v) {
+  return String(v || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function openImportReportModal() {
+  if (!lastImportReport) return;
+  const report = lastImportReport;
+  const el = document.getElementById('import-report-content');
+  if (!el) return;
+
+  const summaryHtml = `
+    <div class="import-report-summary">
+      <div class="import-report-card ${report.status === 'error' ? 'err' : 'ok'}">
+        <div class="label">Estado</div>
+        <div class="value">${report.status === 'error' ? 'Con errores' : report.status === 'warn' ? 'Parcial' : 'Exitosa'}</div>
+      </div>
+      <div class="import-report-card ok"><div class="label">Actualizadas</div><div class="value">${report.matched}</div></div>
+      <div class="import-report-card"><div class="label">Filas leídas</div><div class="value">${report.parsed}</div></div>
+      <div class="import-report-card warn"><div class="label">Sin match</div><div class="value">${report.unmatchedRows.length}</div></div>
+      <div class="import-report-card ${report.parseErrors.length ? 'err' : ''}"><div class="label">Errores parseo</div><div class="value">${report.parseErrors.length}</div></div>
+    </div>`;
+
+  const updatedRows = report.updatedRows.length
+    ? `<div style="font-size:0.82rem;font-weight:600;">Comparación viejo vs nuevo (docentes/estudiantes)</div>
+      <div class="import-report-list">
+        <div class="import-report-row header">
+          <div>Tipo</div><div>Nombre</div><div>CI</div><div>Fecha anterior</div><div>Fecha nueva</div>
+        </div>
+        ${report.updatedRows.map(r => `<div class="import-report-row">
+          <div>${escapeHtml(r.relation)}</div>
+          <div title="Línea CSV ${r.line} · ${r.method}">${escapeHtml(r.name)}</div>
+          <div>${escapeHtml(r.ci)}</div>
+          <div>${escapeHtml(r.oldDate)}</div>
+          <div style="color:var(--green);font-weight:700;">${escapeHtml(r.newDate)}</div>
+        </div>`).join('')}
+      </div>`
+    : `<div style="font-size:0.82rem;color:var(--text-dim);margin-bottom:0.8rem;">No hubo cambios aplicados.</div>`;
+
+  const unmatchedRows = report.unmatchedRows.length
+    ? `<div style="font-size:0.82rem;font-weight:600;">Registros no vinculados</div>
+      <div class="import-report-list">
+        <div class="import-report-row header">
+          <div>Línea</div><div>Nombre CSV</div><div>CI</div><div>Fecha</div><div>Motivo</div>
+        </div>
+        ${report.unmatchedRows.slice(0, 120).map(r => `<div class="import-report-row">
+          <div>${escapeHtml(r.line)}</div>
+          <div>${escapeHtml(r.name)}</div>
+          <div>${escapeHtml(r.ci)}</div>
+          <div>${escapeHtml(r.date)}</div>
+          <div style="color:var(--orange);">${escapeHtml(r.reason)}</div>
+        </div>`).join('')}
+      </div>`
+    : '';
+
+  const errors = report.parseErrors.length
+    ? `<div style="font-size:0.82rem;font-weight:600;">Errores específicos detectados</div>
+      <div class="import-report-list">${report.parseErrors.slice(0, 200).map(e => `<div class="import-error-item">❌ ${escapeHtml(e)}</div>`).join('')}</div>`
+    : `<div style="font-size:0.82rem;color:var(--green);margin-top:0.5rem;">✅ No se detectaron errores de parseo.</div>`;
+
+  el.innerHTML = summaryHtml + updatedRows + unmatchedRows + errors;
+  document.getElementById('import-report-modal').classList.add('show');
+}
+
+function closeImportReportModal() {
+  document.getElementById('import-report-modal').classList.remove('show');
+}
+
+document.getElementById('import-report-modal').addEventListener('click', (e) => {
+  if (e.target === document.getElementById('import-report-modal')) closeImportReportModal();
+});
 </script>
 
 </body>
