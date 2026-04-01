@@ -2471,7 +2471,7 @@ function toggleValidation() {
 
 function runValidation() {
   const issues = [];
-  const specialCharRegex = /[áéíóúÁÉÍÓÚñÑüÜ''´`çÇ]/;
+  const specialCharRegex = /[üÜöÖäÄëËïÏ''´`']/;
   const validCiRegex = /^\d{6,8}$/;
   const validDateRegex = /^\d{2}\/\d{2}\/\d{4}$/;
 
@@ -2501,12 +2501,12 @@ function runValidation() {
       issues.push({ type: 'error', msg: `${label}: falta primer apellido`, idx: i });
     }
 
-    // Special characters in name (Ceibal is sensitive)
+    // Dieresis/crema or apostrophes in name (Ceibal is sensitive to these)
     if (specialCharRegex.test(r.primerNombre)) {
-      issues.push({ type: 'warn', msg: `${label}: nombre contiene caracteres especiales "${r.primerNombre}"`, idx: i });
+      issues.push({ type: 'warn', msg: `${label}: nombre contiene diéresis o apóstrofe "${r.primerNombre}"`, idx: i, field: 'primerNombre' });
     }
     if (specialCharRegex.test(r.primerApellido)) {
-      issues.push({ type: 'warn', msg: `${label}: apellido contiene caracteres especiales "${r.primerApellido}"`, idx: i });
+      issues.push({ type: 'warn', msg: `${label}: apellido contiene diéresis o apóstrofe "${r.primerApellido}"`, idx: i, field: 'primerApellido' });
     }
 
     // Missing ciclo or grado
@@ -2544,6 +2544,57 @@ function runValidation() {
   return issues;
 }
 
+function parseSpanishDate(raw) {
+  if (!raw) return '';
+  const meses = {
+    'enero':1,'febrero':2,'marzo':3,'abril':4,'mayo':5,'junio':6,
+    'julio':7,'agosto':8,'setiembre':9,'septiembre':9,'octubre':10,'noviembre':11,'diciembre':12
+  };
+  // "01 de septiembre de 1983" or "4 de noviembre de 1986"
+  const m = raw.trim().match(/^(\d{1,2})\s+de\s+(\w+)\s+de\s*(\d{4})$/i);
+  if (!m) return '';
+  const day = m[1].padStart(2, '0');
+  const monthName = m[2].toLowerCase();
+  const month = meses[monthName];
+  if (!month) return '';
+  return `${day}/${String(month).padStart(2, '0')}/${m[3]}`;
+}
+
+function importStaffDatesFromCSV(csvText) {
+  const lines = csvText.split('\n').map(l => l.trim()).filter(l => l);
+  let matched = 0;
+  for (const line of lines) {
+    // Parse CSV line (handle quoted fields)
+    const cols = [];
+    let current = '', inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') { inQuotes = !inQuotes; continue; }
+      if (ch === ',' && !inQuotes) { cols.push(current.trim()); current = ''; continue; }
+      current += ch;
+    }
+    cols.push(current.trim());
+
+    // Find CI column (index 5) and date column (index 6) based on user's format
+    const ciRaw = (cols[5] || '').replace(/[\-.\s]/g, '').replace(/\D/g, '');
+    const dateRaw = cols[6] || '';
+    if (!ciRaw || ciRaw.length < 6 || !dateRaw) continue;
+
+    const parsedDate = parseSpanishDate(dateRaw) || cleanDate(dateRaw);
+    if (!parsedDate) continue;
+
+    // Find matching staff records by CI
+    allRecords.forEach(r => {
+      if (r.relacion !== 'DOCENTE') return;
+      if (r.ci === ciRaw && (!r.fechaNac || r.fechaNac.trim() === '')) {
+        r.fechaNac = parsedDate;
+        matched++;
+      }
+    });
+  }
+  return matched;
+}
+
 function renderValidation() {
   const issues = runValidation();
   const panel = document.getElementById('validation-panel');
@@ -2555,29 +2606,117 @@ function renderValidation() {
   const warns = issues.filter(i => i.type === 'warn');
   const infos = issues.filter(i => i.type === 'info');
 
+  // Separate special char issues (editable) from other warns
+  const specialCharIssues = warns.filter(i => i.field);
+  const otherWarns = warns.filter(i => !i.field);
+  // Separate missing date infos for staff
+  const missingDateStaff = infos.filter(i => i.idx !== undefined && allRecords[i.idx] && allRecords[i.idx].relacion === 'DOCENTE');
+  const otherInfos = infos.filter(i => !(i.idx !== undefined && allRecords[i.idx] && allRecords[i.idx].relacion === 'DOCENTE'));
+
   if (issues.length === 0) {
     panel.style.display = 'block';
     icon.textContent = '✅';
     title.innerHTML = `Validación de datos — <span class="val-ok">Todo correcto</span>`;
     body.innerHTML = '<p style="color:var(--green);font-size:0.82rem;">No se encontraron problemas en los datos.</p>';
-  } else {
-    panel.style.display = 'block';
-    icon.textContent = errors.length > 0 ? '🔴' : warns.length > 0 ? '⚠' : 'ℹ';
-    const parts = [];
-    if (errors.length > 0) parts.push(`${errors.length} errores`);
-    if (warns.length > 0) parts.push(`${warns.length} advertencias`);
-    if (infos.length > 0) parts.push(`${infos.length} avisos`);
-    const severityClass = errors.length > 0 ? 'val-error' : warns.length > 0 ? 'val-warn' : 'val-info';
-    title.innerHTML = `Validación de datos — <span class="${severityClass}">${parts.join(', ')}</span>`;
+    return;
+  }
 
-    body.innerHTML = issues.map(issue => {
-      const cls = issue.type === 'error' ? 'val-error' : issue.type === 'warn' ? 'val-warn' : 'val-info';
-      const ico = issue.type === 'error' ? '✕' : issue.type === 'warn' ? '⚠' : 'ℹ';
-      return `<div class="validation-item">
-        <span class="val-icon ${cls}">${ico}</span>
-        <span class="${cls}">${issue.msg}</span>
+  panel.style.display = 'block';
+  icon.textContent = errors.length > 0 ? '🔴' : warns.length > 0 ? '⚠' : 'ℹ';
+  const parts = [];
+  if (errors.length > 0) parts.push(`${errors.length} errores`);
+  if (warns.length > 0) parts.push(`${warns.length} advertencias`);
+  if (infos.length > 0) parts.push(`${infos.length} avisos`);
+  const severityClass = errors.length > 0 ? 'val-error' : warns.length > 0 ? 'val-warn' : 'val-info';
+  title.innerHTML = `Validación de datos — <span class="${severityClass}">${parts.join(', ')}</span>`;
+
+  let html = '';
+
+  // Regular errors
+  html += errors.map(issue => `<div class="validation-item">
+    <span class="val-icon val-error">✕</span>
+    <span class="val-error">${issue.msg}</span>
+  </div>`).join('');
+
+  // Other warnings (non-special-char)
+  html += otherWarns.map(issue => `<div class="validation-item">
+    <span class="val-icon val-warn">⚠</span>
+    <span class="val-warn">${issue.msg}</span>
+  </div>`).join('');
+
+  // Special character issues — editable section
+  if (specialCharIssues.length > 0) {
+    html += `<div style="margin-top:0.8rem;padding:0.8rem;background:var(--surface2);border-radius:8px;border:1px solid var(--orange);">
+      <div style="font-weight:600;font-size:0.85rem;color:var(--orange);margin-bottom:0.5rem;">
+        ⚠ Nombres con diéresis o apóstrofe (${specialCharIssues.length}) — editá directamente:
       </div>`;
-    }).join('');
+    specialCharIssues.forEach(issue => {
+      const r = allRecords[issue.idx];
+      const val = r[issue.field];
+      const fieldLabel = issue.field === 'primerNombre' ? 'Nombre' : 'Apellido';
+      html += `<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.4rem;">
+        <span style="font-size:0.8rem;color:var(--text-dim);min-width:200px;">#${issue.idx+1} ${r.primerNombre} ${r.primerApellido} — ${fieldLabel}:</span>
+        <input type="text" value="${(val || '').replace(/"/g, '&quot;')}"
+          style="flex:1;padding:0.3rem 0.5rem;border:1px solid var(--orange);border-radius:4px;background:var(--bg);color:var(--text);font-size:0.85rem;"
+          onchange="allRecords[${issue.idx}].${issue.field} = this.value.toUpperCase(); renderStep3();">
+      </div>`;
+    });
+    html += `</div>`;
+  }
+
+  // Other infos (non-staff missing dates)
+  html += otherInfos.map(issue => `<div class="validation-item">
+    <span class="val-icon val-info">ℹ</span>
+    <span class="val-info">${issue.msg}</span>
+  </div>`).join('');
+
+  // Missing staff birth dates — with CSV paste area
+  if (missingDateStaff.length > 0) {
+    html += `<div style="margin-top:0.8rem;padding:0.8rem;background:var(--surface2);border-radius:8px;border:1px solid var(--text-dim);">
+      <div style="font-weight:600;font-size:0.85rem;color:var(--text-dim);margin-bottom:0.5rem;">
+        ℹ Docentes sin fecha de nacimiento (${missingDateStaff.length}):
+      </div>`;
+    missingDateStaff.forEach(issue => {
+      const r = allRecords[issue.idx];
+      html += `<div style="font-size:0.8rem;color:var(--text-dim);margin-bottom:0.2rem;">
+        - ${r.primerNombre} ${r.primerApellido} (CI: ${r.ci})
+      </div>`;
+    });
+    html += `<div style="margin-top:0.6rem;border-top:1px solid var(--border);padding-top:0.6rem;">
+        <div style="font-size:0.82rem;font-weight:600;color:var(--accent);margin-bottom:0.3rem;">
+          Pegar CSV de datos de funcionarios para completar fechas:
+        </div>
+        <textarea id="staff-dates-csv" rows="4"
+          style="width:100%;padding:0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text);font-size:0.78rem;font-family:monospace;resize:vertical;"
+          placeholder="Pegá aquí el CSV con formato: ACTIVO,Apellido/s,Nombre/s,Cargo,Derecho de imágen,CI,Fecha de Nacimiento,..."></textarea>
+        <button onclick="handleStaffDateCSV()" class="btn btn-outline" style="margin-top:0.4rem;font-size:0.8rem;padding:0.3rem 0.8rem;">
+          Importar fechas de nacimiento
+        </button>
+        <span id="staff-csv-result" style="margin-left:0.5rem;font-size:0.8rem;"></span>
+      </div>
+    </div>`;
+  }
+
+  body.innerHTML = html;
+}
+
+function handleStaffDateCSV() {
+  const textarea = document.getElementById('staff-dates-csv');
+  const resultSpan = document.getElementById('staff-csv-result');
+  if (!textarea || !textarea.value.trim()) {
+    resultSpan.textContent = 'Pegá el CSV primero.';
+    resultSpan.style.color = 'var(--red)';
+    return;
+  }
+  const matched = importStaffDatesFromCSV(textarea.value);
+  if (matched > 0) {
+    resultSpan.textContent = `✓ ${matched} fecha(s) importada(s) correctamente.`;
+    resultSpan.style.color = 'var(--green)';
+    textarea.value = '';
+    renderStep3();
+  } else {
+    resultSpan.textContent = 'No se encontraron coincidencias por CI. Verificá el formato.';
+    resultSpan.style.color = 'var(--orange)';
   }
 }
 </script>
