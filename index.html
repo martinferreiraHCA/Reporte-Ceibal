@@ -2725,31 +2725,33 @@ function parseSpanishDate(raw) {
   return `${day}/${String(month).padStart(2, '0')}/${m[3]}`;
 }
 
-function importStaffDatesFromCSV(csvText) {
-  const normalizedInput = (csvText || '')
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n')
-    .replace(/\\n/g, '\n');
-  const lines = normalizedInput.split('\n').map(l => l.trim()).filter(l => l);
-  let matched = 0;
-  const report = {
-    parsed: 0,
-    withCI: 0,
-    withDate: 0,
-    matched: 0,
-    details: [],
-    updatedRows: [],
-    unmatchedRows: [],
-    parseErrors: [],
-    status: 'ok'
-  };
+function parseLine(line) {
+  const delimiter = line.includes('\t') ? '\t' : ',';
+  const cols = [];
+  let current = '', inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') { current += '"'; i++; }
+      else { inQuotes = !inQuotes; }
+      continue;
+    }
+    if (ch === delimiter && !inQuotes) { cols.push(current.trim()); current = ''; continue; }
+    current += ch;
+  }
+  cols.push(current.trim());
+  return cols;
+}
 
-// Parse CSV into structured entries with auto-detected columns
+function normStr(s) {
+  return (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim().toUpperCase();
+}
+
 function parseStaffCSV(csvText) {
-  const lines = csvText.split('\n').map(l => l.trim()).filter(l => l);
+  const normalizedInput = (csvText || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const lines = normalizedInput.split('\n').map(l => l.trim()).filter(l => l);
   let colCI = 5, colFecha = 6, colNombre = 2, colApellido = 1;
 
-  // Detect header columns
   for (let li = 0; li < Math.min(lines.length, 10); li++) {
     const testCols = parseLine(lines[li]);
     for (let c = 0; c < testCols.length; c++) {
@@ -2761,199 +2763,126 @@ function parseStaffCSV(csvText) {
     }
   }
 
-  // Build lookup of CSV data
-  const csvEntries = [];
-  const knownDatesByCI = new Map();
-  const knownDatesByName = new Map();
-  const normName = (v) => (v || '')
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/\s+/g, ' ').trim().toUpperCase();
-
-  for (const line of lines) {
-    const cols = parseLine(line);
+  const entries = [];
+  for (let li = 0; li < lines.length; li++) {
+    const cols = parseLine(lines[li]);
     const firstCol = (cols[0] || '').toUpperCase().trim();
-    // Skip empty, header, and metadata rows
     if (!firstCol || firstCol === 'ACTIVO' || (/^\d+$/.test(firstCol) && cols.filter(c => c).length < 3)) continue;
 
-    report.parsed++;
-    const maxRequired = Math.max(colCI, colFecha, colNombre, colApellido);
-    if (cols.length <= maxRequired) {
-      report.parseErrors.push(`Línea ${li + 1}: columnas insuficientes (esperadas hasta índice ${maxRequired}, recibidas ${cols.length}).`);
-    }
-
-    const ciRaw = (cols[colCI] || '').replace(/[\-.\s]/g, '').replace(/\D/g, '');
+    const ci = (cols[colCI] || '').replace(/[\-.\s]/g, '').replace(/\D/g, '');
     const dateRaw = (cols[colFecha] || '').trim();
-    const nombre = normName(cols[colNombre] || '');
-    const apellido = normName(cols[colApellido] || '');
+    const nombre = (cols[colNombre] || '').trim();
+    const apellido = (cols[colApellido] || '').trim();
+    const date = parseSpanishDate(dateRaw) || cleanDate(dateRaw);
 
-    entries.push({ ci, date, nombre, apellido, dateRaw });
+    entries.push({ ci, date, nombre, apellido, dateRaw, line: li + 1 });
   }
   return entries;
 }
 
-    const parsedDate = parseSpanishDate(dateRaw) || cleanDate(dateRaw);
-    if (parsedDate) report.withDate++;
-    if (dateRaw && !parsedDate) {
-      report.parseErrors.push(`Línea ${li + 1}: fecha inválida "${dateRaw}" para ${nombre || '(sin nombre)'} ${apellido || ''}.`);
-    }
+function importStaffDatesFromCSV(csvText) {
+  const csvEntries = parseStaffCSV(csvText);
+  const report = { parsed: csvEntries.length, withCI: 0, withDate: 0, matched: 0, details: [], updatedRows: [], unmatchedRows: [], parseErrors: [], status: 'ok' };
 
-    if (parsedDate) {
-      if (ciRaw) knownDatesByCI.set(ciRaw, parsedDate);
-      if (apellido || nombre) knownDatesByName.set(`${apellido}|${nombre}`, parsedDate);
-    }
-    csvEntries.push({ ci: ciRaw, date: parsedDate, nombre, apellido, raw: dateRaw });
-  }
-
-  // Second pass: complete CSV rows that had missing dates using repeated entries in the same document
-  csvEntries.forEach(entry => {
-    if (entry.date) return;
-    if (entry.ci && knownDatesByCI.has(entry.ci)) {
-      entry.date = knownDatesByCI.get(entry.ci);
-      return;
-    }
-    const key = `${entry.apellido}|${entry.nombre}`;
-    if (knownDatesByName.has(key)) {
-      entry.date = knownDatesByName.get(key);
-    }
+  csvEntries.forEach(e => {
+    if (e.ci && e.ci.length >= 6) report.withCI++;
+    if (e.date) report.withDate++;
   });
 
-  // Helper to normalize CI for flexible matching
-  function normCI(ci) {
-    if (!ci) return '';
-    const d = ci.replace(/\D/g, '');
-    // Return both full and without-check-digit versions
-    return d;
-  }
-
-  const csvEntries = parseStaffCSV(textarea.value);
   const staffMissing = allRecords
     .map((r, i) => ({ r, i }))
     .filter(({ r }) => r.relacion === 'DOCENTE' && (!r.fechaNac || r.fechaNac.trim() === ''));
 
-  if (csvEntries.length === 0) {
-    resultDiv.innerHTML = '<span style="color:var(--red);">No se pudieron leer filas del CSV. Verificá que pegaste el contenido correctamente.</span>';
-    return;
-  }
-
+  for (const entry of csvEntries) {
+    if (!entry.date) continue;
     let found = false;
 
     // Strategy 1: exact CI match
     for (const { r, i } of staffMissing) {
-      if (r.fechaNac && r.fechaNac.trim() !== '') continue; // already filled
-      if (r.ci === entry.ci) {
+      if (r.fechaNac && r.fechaNac.trim() !== '') continue;
+      if (entry.ci && r.ci && entry.ci === r.ci) {
         const oldDate = r.fechaNac || '';
         r.fechaNac = entry.date;
-        matched++;
-        report.details.push(`✓ CI ${entry.ci}: ${r.primerNombre} ${r.primerApellido} → ${entry.date}`);
-        report.updatedRows.push({
-          idx: i,
-          relation: r.relacion,
-          name: `${r.primerNombre} ${r.primerApellido}`.trim(),
-          ci: r.ci,
-          oldDate: oldDate || '(vacío)',
-          newDate: r.fechaNac,
-          method: 'CI exacta',
-          line: entry.line
-        });
-        found = true;
-        break;
+        report.matched++;
+        report.details.push(`CI ${entry.ci}: ${r.primerNombre} ${r.primerApellido} -> ${entry.date}`);
+        report.updatedRows.push({ idx: i, relation: r.relacion, name: `${r.primerNombre} ${r.primerApellido}`, ci: r.ci, oldDate: oldDate || '(vacio)', newDate: entry.date, method: 'CI exacta', line: entry.line });
+        found = true; break;
       }
     }
     if (found) continue;
 
-    // Strategy 2: CI without check digit (7 vs 8 digits)
+    // Strategy 2: CI flexible (7 vs 8 digits)
     for (const { r, i } of staffMissing) {
       if (r.fechaNac && r.fechaNac.trim() !== '') continue;
-      const rci = r.ci, eci = entry.ci;
-      if ((rci.length === 7 && eci.length === 8 && eci.startsWith(rci))
+      const rci = r.ci || '', eci = entry.ci || '';
+      if (!rci || !eci) continue;
+      const match = (rci.length === 7 && eci.length === 8 && eci.startsWith(rci))
         || (rci.length === 8 && eci.length === 7 && rci.startsWith(eci))
-        || (rci.length >= 6 && eci.length >= 6 && rci.slice(0, 6) === eci.slice(0, 6))) {
+        || (rci.length >= 6 && eci.length >= 6 && rci.slice(0, 6) === eci.slice(0, 6));
+      if (match) {
         const oldDate = r.fechaNac || '';
         r.fechaNac = entry.date;
-        matched++;
-        report.details.push(`✓ CI ~${entry.ci}→${rci}: ${r.primerNombre} ${r.primerApellido} → ${entry.date}`);
-        report.updatedRows.push({
-          idx: i,
-          relation: r.relacion,
-          name: `${r.primerNombre} ${r.primerApellido}`.trim(),
-          ci: r.ci,
-          oldDate: oldDate || '(vacío)',
-          newDate: r.fechaNac,
-          method: 'CI aproximada',
-          line: entry.line
-        });
-        found = true;
-        break;
+        report.matched++;
+        report.details.push(`CI ~${entry.ci}->${rci}: ${r.primerNombre} ${r.primerApellido} -> ${entry.date}`);
+        report.updatedRows.push({ idx: i, relation: r.relacion, name: `${r.primerNombre} ${r.primerApellido}`, ci: r.ci, oldDate: oldDate || '(vacio)', newDate: entry.date, method: 'CI aproximada', line: entry.line });
+        found = true; break;
       }
     }
     if (found) continue;
 
-    // Strategy 3: match by name (apellido)
+    // Strategy 3: match by name
     if (entry.apellido) {
       for (const { r, i } of staffMissing) {
         if (r.fechaNac && r.fechaNac.trim() !== '') continue;
-        // Normalize: remove accents for comparison
-        const norm = s => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
-        const rApellido = norm(r.primerApellido);
-        const eApellido = norm(entry.apellido.split(/\s+/)[0]); // first word of apellido
-        const rNombre = norm(r.primerNombre);
-        const eNombre = norm(entry.nombre.split(/\s+/)[0]);
-        if (rApellido === eApellido && rNombre === eNombre) {
+        const rAp = normStr(r.primerApellido);
+        const eAp = normStr(entry.apellido.split(/\s+/)[0]);
+        const rNom = normStr(r.primerNombre);
+        const eNom = normStr(entry.nombre.split(/\s+/)[0]);
+        if (rAp && eAp && rAp === eAp && rNom === eNom) {
           const oldDate = r.fechaNac || '';
           r.fechaNac = entry.date;
-          matched++;
-          report.details.push(`✓ Nombre ${entry.nombre} ${entry.apellido}: ${r.primerNombre} ${r.primerApellido} → ${entry.date}`);
-          report.updatedRows.push({
-            idx: i,
-            relation: r.relacion,
-            name: `${r.primerNombre} ${r.primerApellido}`.trim(),
-            ci: r.ci,
-            oldDate: oldDate || '(vacío)',
-            newDate: r.fechaNac,
-            method: 'Nombre + apellido',
-            line: entry.line
-          });
-          found = true;
-          break;
+          report.matched++;
+          report.details.push(`Nombre ${entry.nombre} ${entry.apellido}: ${r.primerNombre} ${r.primerApellido} -> ${entry.date}`);
+          report.updatedRows.push({ idx: i, relation: r.relacion, name: `${r.primerNombre} ${r.primerApellido}`, ci: r.ci, oldDate: oldDate || '(vacio)', newDate: entry.date, method: 'Nombre + apellido', line: entry.line });
+          found = true; break;
         }
       }
     }
+
     if (!found) {
-      report.unmatchedRows.push({
-        line: entry.line,
-        ci: entry.ci || '(sin CI)',
-        name: `${entry.nombre || '(sin nombre)'} ${entry.apellido || ''}`.trim(),
-        date: entry.date,
-        reason: 'Sin coincidencia en docentes con fecha faltante.'
-      });
+      report.unmatchedRows.push({ line: entry.line, ci: entry.ci || '(sin CI)', name: `${entry.nombre || ''} ${entry.apellido || ''}`.trim() || '(sin nombre)', date: entry.date, reason: 'Sin coincidencia en docentes con fecha faltante.' });
     }
   }
 
-  report.matched = matched;
   if (report.parseErrors.length > 0) report.status = 'warn';
-  if (report.matched === 0 && report.parseErrors.length > 0) report.status = 'error';
+  if (report.matched === 0 && report.parsed > 0) report.status = 'error';
   return report;
 }
 
-function parseLine(line) {
-  // Auto-detect delimiter: prioritize ; then tab then comma
-  const delimiter = line.includes(';') ? ';' : (line.includes('\t') ? '\t' : ',');
-  const cols = [];
-  let current = '', inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === '"') {
-      // Handle escaped quotes ("")
-      if (inQuotes && line[i + 1] === '"') {
-        current += '"';
-        i++;
-      } else {
-        inQuotes = !inQuotes;
-      }
-      continue;
-    }
-    if (ch === delimiter && !inQuotes) { cols.push(current.trim()); current = ''; continue; }
-    current += ch;
+function handleStaffDateCSV() {
+  const textarea = document.getElementById('staff-dates-csv');
+  const resultDiv = document.getElementById('staff-csv-result');
+  if (!textarea || !textarea.value.trim()) {
+    resultDiv.innerHTML = '<span style="color:var(--red);">Pega el CSV primero.</span>';
+    return;
+  }
+  const report = importStaffDatesFromCSV(textarea.value);
+  lastImportReport = report;
+  if (report.matched > 0) {
+    resultDiv.innerHTML = `<span style="color:var(--green);">✓ ${report.matched} fecha(s) importada(s)</span>` +
+      ` <span style="color:var(--text-dim);">(${report.parsed} filas, ${report.withCI} con CI, ${report.withDate} con fecha)</span>`;
+    textarea.value = '';
+    renderStep3();
+    openImportReportModal();
+  } else {
+    const staffMissing = allRecords.filter(r => r.relacion === 'DOCENTE' && (!r.fechaNac || !r.fechaNac.trim()));
+    const staffCIs = staffMissing.map(r => r.ci).filter(c => c);
+    resultDiv.innerHTML = `<span style="color:var(--orange);">Sin coincidencias.</span>` +
+      `<br><span style="color:var(--text-dim);font-size:0.75rem;">` +
+      `CSV: ${report.parsed} filas, ${report.withCI} con CI, ${report.withDate} con fecha.<br>` +
+      `Docentes sin fecha: ${staffMissing.length} (CIs: ${staffCIs.slice(0, 5).join(', ')}${staffCIs.length > 5 ? '...' : ''})` +
+      `</span>`;
+    if (report.parsed > 0) openImportReportModal();
   }
 }
 
@@ -3077,25 +3006,8 @@ function applyManualDate(idx) {
     input.style.borderColor = 'var(--red)';
     return;
   }
-  const report = importStaffDatesFromCSV(textarea.value);
-  lastImportReport = report;
-  if (report.matched > 0) {
-    resultSpan.innerHTML = `<span style="color:var(--green);">✓ ${report.matched} fecha(s) importada(s)</span>` +
-      ` <span style="color:var(--text-dim);">(${report.parsed} filas leídas, ${report.withCI} con CI, ${report.withDate} con fecha, ${report.parseErrors.length} errores)</span>`;
-    textarea.value = '';
-    renderStep3();
-    openImportReportModal();
-  } else {
-    // Show debug info to help user understand
-    const staffMissing = allRecords.filter(r => r.relacion === 'DOCENTE' && (!r.fechaNac || !r.fechaNac.trim()));
-    const staffCIs = staffMissing.map(r => r.ci).filter(c => c);
-    resultSpan.innerHTML = `<span style="color:var(--orange);">Sin coincidencias.</span>` +
-      `<br><span style="color:var(--text-dim);font-size:0.75rem;">` +
-      `CSV: ${report.parsed} filas, ${report.withCI} con CI, ${report.withDate} con fecha válida, ${report.parseErrors.length} errores.<br>` +
-      `Docentes sin fecha: ${staffMissing.length} (CIs: ${staffCIs.slice(0, 5).join(', ')}${staffCIs.length > 5 ? '...' : ''})` +
-      `</span>`;
-    openImportReportModal();
-  }
+  allRecords[idx].fechaNac = parsed;
+  renderStep3();
 }
 
 function escapeHtml(v) {
