@@ -2554,6 +2554,17 @@ function toggleValidation() {
   document.getElementById('validation-toggle-hint').textContent = validationOpen ? 'clic para colapsar' : 'clic para expandir';
 }
 
+function toSupportedName(value) {
+  return (value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\w\s-]/g, ' ')
+    .replace(/_/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase();
+}
+
 function runValidation() {
   const issues = [];
   const specialCharRegex = /[üÜöÖäÄëËïÏ''´`']/;
