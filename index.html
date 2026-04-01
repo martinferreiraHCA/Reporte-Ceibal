@@ -1040,6 +1040,7 @@ function parseStaffFile(wb) {
   const ws = wb.Sheets[wb.SheetNames[0]];
   const range = XLSX.utils.decode_range(ws['!ref']);
   const records = [];
+  const skippedCese = [];
   const seenCIs = new Set();
 
   // Docente-eligible cargo keywords (for ciclo classification)
@@ -1060,7 +1061,8 @@ function parseStaffFile(wb) {
     ci: v => /^(C\.?I\.?|N[ºRO.]*\s*DOC.*|DOC|DOCUMENTO|CEDULA|CÉDULA)$/i.test(v.replace(/[()]/g, '').trim()),
     nombre: v => /^(NOMBRE|PRIMER\s*NOMBRE|NOMBRES)$/i.test(v),
     apellido: v => /^(APELLIDO|PRIMER\s*APELLIDO|APELLIDOS)$/i.test(v),
-    fecNac: v => /FECHA/i.test(v) || (/^FEC/i.test(v) && /NAC/i.test(v)),
+    fecNac: v => (/NAC/i.test(v) && /FEC/i.test(v)) || (/^FECHA$/i.test(v) && !/CESE|BAJA|EGRESO/i.test(v)),
+    fecCese: v => /CESE/i.test(v) || /BAJA/i.test(v) || (/FEC/i.test(v) && /EGRESO/i.test(v)),
     cargo: v => /^CARGO[S]?$/i.test(v)
   };
 
@@ -1086,13 +1088,14 @@ function parseStaffFile(wb) {
   }
 
   // Only trust header detection if we found at least 2 header matches
-  let colCI, colNombre, colApellido, colFecNac, colCargo;
+  let colCI, colNombre, colApellido, colFecNac, colCargo, colFecCese;
   if (bestScore >= 2) {
     colCI = detectedCols.ci ?? 1;
     colNombre = detectedCols.nombre ?? 2;
     colApellido = detectedCols.apellido ?? 4;
     colFecNac = detectedCols.fecNac ?? 9;
     colCargo = detectedCols.cargo ?? 73;
+    colFecCese = detectedCols.fecCese ?? -1;
   } else {
     // Fallback to hardcoded columns (original ExpDatosPersonal layout)
     headerRow = -1;
@@ -1101,6 +1104,7 @@ function parseStaffFile(wb) {
     colApellido = 4;  // Column E
     colFecNac = 9;    // Column J
     colCargo = 73;    // Column BV
+    colFecCese = -1;  // Not detected
   }
 
   // ---- Step 2: Determine data start row ----
@@ -1132,6 +1136,17 @@ function parseStaffFile(wb) {
     // Skip duplicates
     if (seenCIs.has(doc)) continue;
     seenCIs.add(doc);
+
+    // Skip teachers with fecha de cese (no longer working at the institution)
+    if (colFecCese >= 0) {
+      const ceseVal = getVal(colFecCese).trim();
+      if (ceseVal && ceseVal !== '0' && ceseVal !== '-') {
+        const nombre = getVal(colNombre) || '';
+        const apellido = getVal(colApellido) || '';
+        skippedCese.push(`${nombre} ${apellido}`.trim() + ` (CI: ${doc})`);
+        continue;
+      }
+    }
 
     // --- Get name and surname: try known columns, then infer ---
     let primerNombre = getVal(colNombre);
@@ -1211,7 +1226,7 @@ function parseStaffFile(wb) {
     });
   }
 
-  return records;
+  return { records, skippedCese };
 }
 
 // ===== File loading =====
@@ -1254,14 +1269,23 @@ document.getElementById('file-staff').addEventListener('change', async (e) => {
   if (!file) return;
   try {
     const wb = await readFile(file);
-    const records = parseStaffFile(wb);
+    const result = parseStaffFile(wb);
+    const records = result.records;
+    const skippedCese = result.skippedCese;
     // Remove old docentes, keep students
     allRecords = allRecords.filter(r => r.relacion === 'ESTUDIANTE');
     allRecords = [...allRecords, ...records];
     staffFileLoaded = true;
     document.getElementById('info-staff').classList.remove('hidden');
-    document.getElementById('info-staff').textContent =
-      `✓ ${file.name} — ${records.length} docentes cargados`;
+    let staffMsg = `✓ ${file.name} — ${records.length} docentes cargados`;
+    if (skippedCese.length > 0) {
+      staffMsg += ` <span style="color:var(--orange);">(${skippedCese.length} excluidos por fecha de cese)</span>`;
+      staffMsg += `<details style="margin-top:0.3rem;font-size:0.78rem;"><summary style="cursor:pointer;color:var(--text-dim);">Ver docentes excluidos</summary>` +
+        `<ul style="margin:0.3rem 0 0 1rem;padding:0;list-style:disc;">` +
+        skippedCese.map(s => `<li>${s}</li>`).join('') +
+        `</ul></details>`;
+    }
+    document.getElementById('info-staff').innerHTML = staffMsg;
     updateNextBtn();
   } catch(err) {
     alert('Error al leer el archivo: ' + err.message);
