@@ -2563,36 +2563,59 @@ function parseSpanishDate(raw) {
 function importStaffDatesFromCSV(csvText) {
   const lines = csvText.split('\n').map(l => l.trim()).filter(l => l);
   let matched = 0;
-  for (const line of lines) {
-    // Parse CSV line (handle quoted fields)
-    const cols = [];
-    let current = '', inQuotes = false;
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
-      if (ch === '"') { inQuotes = !inQuotes; continue; }
-      if (ch === ',' && !inQuotes) { cols.push(current.trim()); current = ''; continue; }
-      current += ch;
-    }
-    cols.push(current.trim());
 
-    // Find CI column (index 5) and date column (index 6) based on user's format
-    const ciRaw = (cols[5] || '').replace(/[\-.\s]/g, '').replace(/\D/g, '');
-    const dateRaw = cols[6] || '';
+  // Auto-detect header row to find CI and Fecha columns
+  let colCI = 5, colFecha = 6; // defaults for known format
+  for (let li = 0; li < Math.min(lines.length, 10); li++) {
+    const testCols = parseLine(lines[li]);
+    for (let c = 0; c < testCols.length; c++) {
+      const v = testCols[c].toUpperCase().trim();
+      if (/^CI$|^C\.?I\.?$|^CEDULA|^CÉDULA|DOCUMENTO/.test(v)) colCI = c;
+      if (/FECHA.*NAC|NAC.*FECHA|NACIMIENTO/.test(v)) colFecha = c;
+    }
+  }
+
+  for (const line of lines) {
+    const cols = parseLine(line);
+
+    const ciRaw = (cols[colCI] || '').replace(/[\-.\s]/g, '').replace(/\D/g, '');
+    const dateRaw = cols[colFecha] || '';
     if (!ciRaw || ciRaw.length < 6 || !dateRaw) continue;
 
     const parsedDate = parseSpanishDate(dateRaw) || cleanDate(dateRaw);
     if (!parsedDate) continue;
 
-    // Find matching staff records by CI
+    // Match by CI: try exact match, also try without check digit (7 vs 8 digits)
     allRecords.forEach(r => {
       if (r.relacion !== 'DOCENTE') return;
-      if (r.ci === ciRaw && (!r.fechaNac || r.fechaNac.trim() === '')) {
+      if (r.fechaNac && r.fechaNac.trim() !== '') return;
+      // Compare: exact, or first 7 digits if lengths differ
+      const rci = r.ci;
+      const match = rci === ciRaw
+        || (rci.length === 7 && ciRaw.length === 8 && ciRaw.startsWith(rci))
+        || (rci.length === 8 && ciRaw.length === 7 && rci.startsWith(ciRaw));
+      if (match) {
         r.fechaNac = parsedDate;
         matched++;
       }
     });
   }
   return matched;
+}
+
+function parseLine(line) {
+  // Auto-detect delimiter: if line has tabs, use tabs; otherwise use commas
+  const delimiter = line.includes('\t') ? '\t' : ',';
+  const cols = [];
+  let current = '', inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') { inQuotes = !inQuotes; continue; }
+    if (ch === delimiter && !inQuotes) { cols.push(current.trim()); current = ''; continue; }
+    current += ch;
+  }
+  cols.push(current.trim());
+  return cols;
 }
 
 function renderValidation() {
