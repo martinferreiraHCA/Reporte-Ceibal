@@ -1656,7 +1656,7 @@ function updateFileCountInfo() {
   const info = document.getElementById('report-file-count-info');
   const preview = document.getElementById('report-file-count-preview');
   const n = parseInt(input.value) || 1;
-  const rows = exportRows;
+  const rows = getExportRecords();
   const students = rows.filter(r => r[6] !== 'DOCENTE').length;
   const teachers = rows.filter(r => r[6] === 'DOCENTE').length;
 
