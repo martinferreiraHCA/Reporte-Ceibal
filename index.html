@@ -934,6 +934,44 @@ function cleanDate(raw) {
     return `${day}/${month}/${year}`;
   }
 
+  // Handle Spanish date format: "15 de marzo de 1991"
+  const meses = {
+    'enero':1,'febrero':2,'marzo':3,'abril':4,'mayo':5,'junio':6,
+    'julio':7,'agosto':8,'setiembre':9,'septiembre':9,'octubre':10,'noviembre':11,'diciembre':12
+  };
+  const spanishMatch = d.match(/^(\d{1,2})\s+de\s+(\w+)\s+de\s*(\d{4})$/i);
+  if (spanishMatch) {
+    const sDay = spanishMatch[1].padStart(2, '0');
+    const monthName = spanishMatch[2].toLowerCase();
+    const sMonth = meses[monthName];
+    if (sMonth) return `${sDay}/${String(sMonth).padStart(2, '0')}/${spanishMatch[3]}`;
+  }
+
+  // Handle English month names: "15-Mar-1991", "Mar 15, 1991", "March 15, 1991", etc.
+  const engMonths = {
+    'jan':1,'january':1,'feb':2,'february':2,'mar':3,'march':3,'apr':4,'april':4,
+    'may':5,'jun':6,'june':6,'jul':7,'july':7,'aug':8,'august':8,
+    'sep':9,'sept':9,'september':9,'oct':10,'october':10,'nov':11,'november':11,'dec':12,'december':12
+  };
+  // "15-Mar-1991" or "15-Mar-91"
+  const engMatch1 = d.match(/^(\d{1,2})[\-\s]([A-Za-z]+)[\-\s](\d{2,4})$/);
+  if (engMatch1) {
+    const eMonth = engMonths[engMatch1[2].toLowerCase()];
+    if (eMonth) {
+      let eYear = engMatch1[3];
+      if (eYear.length === 2) { const yy = parseInt(eYear); eYear = yy <= 30 ? '20' + eYear : '19' + eYear; }
+      return `${engMatch1[1].padStart(2, '0')}/${String(eMonth).padStart(2, '0')}/${eYear}`;
+    }
+  }
+  // "Mar 15, 1991" or "March 15, 1991"
+  const engMatch2 = d.match(/^([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})$/);
+  if (engMatch2) {
+    const eMonth = engMonths[engMatch2[1].toLowerCase()];
+    if (eMonth) {
+      return `${engMatch2[2].padStart(2, '0')}/${String(eMonth).padStart(2, '0')}/${engMatch2[3]}`;
+    }
+  }
+
   // Try to parse dd/mm/yy or dd/mm/yyyy with /, - or . separators
   const match = d.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{2,4})$/);
   if (!match) return d; // return as-is if unparseable
