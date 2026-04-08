@@ -912,9 +912,12 @@ function cleanDate(raw) {
   // Detect blank placeholder patterns like '  /  /    ' or '/ /' etc.
   if (d.replace(/[\s\/\-\.]/g, '') === '') return '';
 
-  // Handle Excel serial date numbers (e.g. 33456 -> dd/mm/yyyy)
-  if (/^\d{4,5}$/.test(d)) {
-    const serial = parseInt(d);
+  // Strip time portion if present (e.g. "15/03/1991 00:00:00")
+  d = d.replace(/\s+\d{1,2}:\d{2}(:\d{2})?(\s*(AM|PM))?$/i, '').trim();
+
+  // Handle Excel serial date numbers (e.g. 33456 or 33456.0 -> dd/mm/yyyy)
+  if (/^\d{4,5}(\.\d+)?$/.test(d)) {
+    const serial = parseFloat(d);
     if (serial > 1 && serial < 100000) {
       const utcDays = Math.floor(serial - 25569);
       const date = new Date(utcDays * 86400 * 1000);
@@ -923,6 +926,14 @@ function cleanDate(raw) {
       const year = date.getUTCFullYear();
       return `${day}/${month}/${year}`;
     }
+  }
+
+  // Handle JS Date.toString() output (e.g. "Wed Mar 15 1991 00:00:00 GMT...")
+  const jsDateMatch = d.match(/^[A-Za-z]+\s+([A-Za-z]+)\s+(\d{1,2})\s+(\d{4})/);
+  if (jsDateMatch) {
+    const jsMonths = {'jan':1,'feb':2,'mar':3,'apr':4,'may':5,'jun':6,'jul':7,'aug':8,'sep':9,'oct':10,'nov':11,'dec':12};
+    const mo = jsMonths[jsDateMatch[1].toLowerCase().substring(0,3)];
+    if (mo) return `${jsDateMatch[2].padStart(2,'0')}/${String(mo).padStart(2,'0')}/${jsDateMatch[3]}`;
   }
 
   // Handle ISO format yyyy-mm-dd or yyyy/mm/dd
@@ -1061,6 +1072,24 @@ function parseStudentFile(wb) {
     const getDateVal = (c) => {
       const cell = ws[XLSX.utils.encode_cell({r, c: c-1})];
       if (!cell) return '';
+      // If cell is a number, treat as Excel serial date and convert directly
+      if (cell.t === 'n' && typeof cell.v === 'number') {
+        const serial = cell.v;
+        if (serial > 1 && serial < 100000) {
+          const utcDays = Math.floor(serial - 25569);
+          const dt = new Date(utcDays * 86400 * 1000);
+          return String(dt.getUTCDate()).padStart(2,'0') + '/' +
+                 String(dt.getUTCMonth()+1).padStart(2,'0') + '/' +
+                 dt.getUTCFullYear();
+        }
+      }
+      // If cell is a Date object
+      if (cell.v instanceof Date) {
+        return String(cell.v.getUTCDate()).padStart(2,'0') + '/' +
+               String(cell.v.getUTCMonth()+1).padStart(2,'0') + '/' +
+               cell.v.getUTCFullYear();
+      }
+      // Otherwise try formatted value first, then raw
       if (cell.w && cell.w.trim()) return cell.w.trim();
       return String(cell.v || '').trim();
     };
@@ -1120,11 +1149,28 @@ function parseStaffFile(wb) {
     return cell ? String(cell.v || '').trim() : '';
   };
 
-  // Helper to read date cell: prefer formatted value (cell.w) over raw value (cell.v)
+  // Helper to read date cell: convert Excel serial/Date directly to dd/mm/yyyy
   const getDateCellVal = (r, c) => {
     const cell = ws[XLSX.utils.encode_cell({r, c})];
     if (!cell) return '';
-    // cell.w has the formatted display value (e.g. "15/03/1991"), cell.v may be a serial number
+    // If cell is a number, treat as Excel serial date and convert directly
+    if (cell.t === 'n' && typeof cell.v === 'number') {
+      const serial = cell.v;
+      if (serial > 1 && serial < 100000) {
+        const utcDays = Math.floor(serial - 25569);
+        const dt = new Date(utcDays * 86400 * 1000);
+        return String(dt.getUTCDate()).padStart(2,'0') + '/' +
+               String(dt.getUTCMonth()+1).padStart(2,'0') + '/' +
+               dt.getUTCFullYear();
+      }
+    }
+    // If cell is a Date object
+    if (cell.v instanceof Date) {
+      return String(cell.v.getUTCDate()).padStart(2,'0') + '/' +
+             String(cell.v.getUTCMonth()+1).padStart(2,'0') + '/' +
+             cell.v.getUTCFullYear();
+    }
+    // Otherwise try formatted value first, then raw
     if (cell.w && cell.w.trim()) return cell.w.trim();
     return String(cell.v || '').trim();
   };
