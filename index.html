@@ -655,6 +655,100 @@
   }
   .staff-tab:hover { border-color: var(--accent); color: var(--text); }
   .staff-tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+  /* ===== Depuration Controls ===== */
+  .staff-depure-bar {
+    display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 1.5rem;
+    background: var(--surface); border-bottom: 1px solid var(--border); flex-wrap: wrap;
+  }
+  .staff-depure-bar .group-toggle {
+    font-size: 0.78rem; padding: 0.3rem 0.8rem; border-radius: 6px; cursor: pointer;
+    background: transparent; border: 1px solid var(--border); color: var(--text-dim);
+    transition: all 0.15s;
+  }
+  .staff-depure-bar .group-toggle:hover { border-color: var(--accent); color: var(--text); }
+  .staff-depure-bar .group-toggle.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .staff-depure-bar .depure-info {
+    font-size: 0.75rem; color: var(--text-dim); margin-left: auto;
+  }
+  .staff-depure-bar .depure-info strong { color: var(--red); }
+
+  .staff-section-header {
+    display: flex; align-items: center; gap: 0.5rem; margin: 1.2rem 0 0.6rem;
+    padding-bottom: 0.35rem; border-bottom: 2px solid var(--border);
+  }
+  .staff-section-header .staff-section-title {
+    font-size: 0.9rem; font-weight: 700; margin: 0; padding: 0; border: none;
+    display: flex; align-items: center; gap: 0.5rem; flex: 1;
+  }
+  .staff-section-header .btn-remove-section {
+    font-size: 0.68rem; padding: 0.2rem 0.6rem; border-radius: 5px; cursor: pointer;
+    background: rgba(255,80,80,0.1); border: 1px solid rgba(255,80,80,0.3);
+    color: var(--red); transition: all 0.15s; white-space: nowrap;
+  }
+  .staff-section-header .btn-remove-section:hover {
+    background: rgba(255,80,80,0.25); border-color: var(--red);
+  }
+
+  .staff-card .btn-remove-card {
+    position: absolute; top: 0.4rem; right: 0.4rem;
+    width: 24px; height: 24px; border-radius: 50%; cursor: pointer;
+    background: rgba(255,80,80,0.1); border: 1px solid rgba(255,80,80,0.25);
+    color: var(--red); font-size: 0.85rem; line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+    opacity: 0; transition: opacity 0.15s, background 0.15s;
+  }
+  .staff-card:hover .btn-remove-card { opacity: 1; }
+  .staff-card .btn-remove-card:hover { background: rgba(255,80,80,0.35); }
+  .staff-card { position: relative; }
+
+  .staff-card.removing {
+    animation: cardRemove 0.35s ease forwards;
+  }
+  @keyframes cardRemove {
+    0% { opacity: 1; transform: scale(1); }
+    100% { opacity: 0; transform: scale(0.85); }
+  }
+
+  /* Undo toast */
+  .staff-undo-toast {
+    position: fixed; bottom: 1.5rem; left: 50%; transform: translateX(-50%);
+    background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+    padding: 0.7rem 1.2rem; display: flex; align-items: center; gap: 0.8rem;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.4); z-index: 300;
+    font-size: 0.85rem; transition: opacity 0.3s, transform 0.3s;
+  }
+  .staff-undo-toast.hidden { opacity: 0; transform: translateX(-50%) translateY(20px); pointer-events: none; }
+  .staff-undo-toast .btn-undo {
+    padding: 0.3rem 0.8rem; border-radius: 6px; cursor: pointer;
+    background: var(--accent); border: none; color: #fff; font-size: 0.78rem; font-weight: 600;
+  }
+  .staff-undo-toast .btn-undo:hover { filter: brightness(1.15); }
+  .staff-undo-toast .btn-dismiss {
+    padding: 0.2rem 0.5rem; border-radius: 4px; cursor: pointer;
+    background: transparent; border: 1px solid var(--border); color: var(--text-dim); font-size: 0.72rem;
+  }
+
+  /* Confirm dialog */
+  .staff-confirm-overlay {
+    position: fixed; inset: 0; z-index: 250; background: rgba(0,0,0,0.5);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .staff-confirm-dialog {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 1.5rem; max-width: 400px; width: 90%; text-align: center;
+  }
+  .staff-confirm-dialog h3 { margin: 0 0 0.8rem; font-size: 1rem; }
+  .staff-confirm-dialog p { margin: 0 0 1.2rem; font-size: 0.85rem; color: var(--text-dim); }
+  .staff-confirm-dialog .actions { display: flex; gap: 0.6rem; justify-content: center; }
+  .staff-confirm-dialog .btn-confirm-remove {
+    padding: 0.45rem 1.2rem; border-radius: 8px; cursor: pointer;
+    background: var(--red); border: none; color: #fff; font-weight: 600; font-size: 0.85rem;
+  }
+  .staff-confirm-dialog .btn-confirm-cancel {
+    padding: 0.45rem 1.2rem; border-radius: 8px; cursor: pointer;
+    background: transparent; border: 1px solid var(--border); color: var(--text); font-size: 0.85rem;
+  }
 </style>
 </head>
 <body>
@@ -988,8 +1082,34 @@ Emilia Delgado 100%"></textarea>
     <div class="staff-tab-bar" id="staff-tabs"></div>
     <button class="btn btn-outline" onclick="closeStaffDetail()" style="margin-left:auto;">Cerrar</button>
   </div>
+  <div class="staff-depure-bar" id="staff-depure-bar">
+    <span style="font-size:0.78rem;font-weight:600;">Agrupar por:</span>
+    <button class="group-toggle active" data-group="ciclo" onclick="setStaffGroupBy('ciclo')">Nivel</button>
+    <button class="group-toggle" data-group="grado" onclick="setStaffGroupBy('grado')">Grupo/Grado</button>
+    <button class="group-toggle" data-group="cargo" onclick="setStaffGroupBy('cargo')">Cargo</button>
+    <span class="depure-info" id="depure-removed-info"></span>
+  </div>
   <div class="staff-summary" id="staff-summary"></div>
   <div class="staff-section" id="staff-detail-body"></div>
+</div>
+
+<!-- Undo toast for depuration -->
+<div class="staff-undo-toast hidden" id="staff-undo-toast">
+  <span id="staff-undo-msg">Docente eliminado</span>
+  <button class="btn-undo" onclick="undoStaffRemove()">Deshacer</button>
+  <button class="btn-dismiss" onclick="dismissStaffUndo()">Cerrar</button>
+</div>
+
+<!-- Confirm dialog for bulk remove -->
+<div class="staff-confirm-overlay" id="staff-confirm-overlay" style="display:none;">
+  <div class="staff-confirm-dialog">
+    <h3 id="staff-confirm-title">Confirmar eliminacion</h3>
+    <p id="staff-confirm-msg">...</p>
+    <div class="actions">
+      <button class="btn-confirm-cancel" onclick="cancelStaffConfirm()">Cancelar</button>
+      <button class="btn-confirm-remove" onclick="executeStaffConfirm()">Eliminar</button>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -3633,39 +3753,131 @@ document.getElementById('import-report-modal').addEventListener('click', (e) => 
   if (e.target === document.getElementById('import-report-modal')) closeImportReportModal();
 });
 
-// ===== Staff Detail Panel =====
+// ===== Staff Detail Panel with Depuration =====
 let staffDetailFilter = 'all';
+let staffGroupBy = 'ciclo'; // 'ciclo', 'grado', 'cargo'
+let staffUndoStack = []; // stack of { indices: number[], records: object[] } for undo
+let staffConfirmCallback = null;
+let staffUndoTimer = null;
 
 function openStaffDetail() {
   document.getElementById('staff-detail-overlay').classList.add('show');
   document.getElementById('staff-detail-search').value = '';
   staffDetailFilter = 'all';
+  staffGroupBy = 'ciclo';
+  staffUndoStack = [];
+  updateGroupToggleButtons();
   renderStaffDetail();
 }
 function closeStaffDetail() {
   document.getElementById('staff-detail-overlay').classList.remove('show');
+  dismissStaffUndo();
+}
+
+function setStaffGroupBy(mode) {
+  staffGroupBy = mode;
+  updateGroupToggleButtons();
+  renderStaffDetail();
+}
+
+function updateGroupToggleButtons() {
+  document.querySelectorAll('#staff-depure-bar .group-toggle').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.group === staffGroupBy);
+  });
 }
 
 document.getElementById('staff-detail-search').addEventListener('input', () => renderStaffDetail());
 
+// --- Remove a single docente ---
+function removeStaffRecord(idx) {
+  const r = allRecords[idx];
+  if (!r) return;
+  // Animate card out
+  const card = document.querySelector(`.staff-card[data-idx="${idx}"]`);
+  if (card) card.classList.add('removing');
+
+  setTimeout(() => {
+    disabledRecords.add(idx);
+    staffUndoStack.push({ indices: [idx], label: `${r.primerNombre || '?'} ${r.primerApellido || '?'}` });
+    showStaffUndo(`Eliminado: ${r.primerNombre || '?'} ${r.primerApellido || '?'}`);
+    renderStaffDetail();
+    renderStep3();
+  }, 300);
+}
+
+// --- Bulk remove all docentes in a section ---
+function confirmRemoveSection(groupKey, indices) {
+  const count = indices.length;
+  document.getElementById('staff-confirm-title').textContent = 'Eliminar grupo completo';
+  document.getElementById('staff-confirm-msg').textContent =
+    `¿Eliminar ${count} docente${count > 1 ? 's' : ''} de "${groupKey}"? Podrás deshacer esta acción.`;
+  document.getElementById('staff-confirm-overlay').style.display = '';
+  staffConfirmCallback = () => {
+    const idxList = indices.map(Number);
+    const names = [];
+    idxList.forEach(i => {
+      disabledRecords.add(i);
+      const r = allRecords[i];
+      if (r) names.push(`${r.primerNombre || '?'} ${r.primerApellido || '?'}`);
+    });
+    staffUndoStack.push({ indices: idxList, label: `${count} docentes de ${groupKey}` });
+    showStaffUndo(`Eliminados: ${count} docentes de "${groupKey}"`);
+    renderStaffDetail();
+    renderStep3();
+  };
+}
+
+function executeStaffConfirm() {
+  document.getElementById('staff-confirm-overlay').style.display = 'none';
+  if (staffConfirmCallback) {
+    staffConfirmCallback();
+    staffConfirmCallback = null;
+  }
+}
+function cancelStaffConfirm() {
+  document.getElementById('staff-confirm-overlay').style.display = 'none';
+  staffConfirmCallback = null;
+}
+
+// --- Undo ---
+function showStaffUndo(msg) {
+  const toast = document.getElementById('staff-undo-toast');
+  document.getElementById('staff-undo-msg').textContent = msg;
+  toast.classList.remove('hidden');
+  clearTimeout(staffUndoTimer);
+  staffUndoTimer = setTimeout(() => dismissStaffUndo(), 8000);
+}
+
+function undoStaffRemove() {
+  if (staffUndoStack.length === 0) return;
+  const last = staffUndoStack.pop();
+  last.indices.forEach(i => disabledRecords.delete(i));
+  dismissStaffUndo();
+  renderStaffDetail();
+  renderStep3();
+}
+
+function dismissStaffUndo() {
+  clearTimeout(staffUndoTimer);
+  document.getElementById('staff-undo-toast').classList.add('hidden');
+}
+
+// --- Main render ---
 function renderStaffDetail() {
   const search = (document.getElementById('staff-detail-search').value || '').trim().toLowerCase();
   const validDate = /^\d{2}\/\d{2}\/\d{4}$/;
 
-  // Collect all docentes
+  // Collect all active docentes
   let docentes = allRecords
     .map((r, i) => ({ ...r, _idx: i }))
     .filter(r => r.relacion === 'DOCENTE' && !disabledRecords.has(r._idx));
 
-  // Group by ciclo
-  const groups = {};
-  docentes.forEach(r => {
-    const key = r.ciclo || 'SIN CLASIFICAR';
-    if (!groups[key]) groups[key] = [];
-    groups[key].push(r);
-  });
+  // Count totals for summary
+  const primaria = docentes.filter(r => r.ciclo === 'PRIMARIA').length;
+  const secundaria = docentes.filter(r => (r.ciclo || '').includes('MEDIA')).length;
+  const inicial = docentes.filter(r => r.ciclo === 'INICIAL').length;
+  const other = docentes.length - primaria - secundaria - inicial;
 
-  // Count issues
   let totalIssues = 0;
   docentes.forEach(r => {
     if (isBadValue(r.primerApellido)) totalIssues++;
@@ -3674,10 +3886,12 @@ function renderStaffDetail() {
     if (!r.ci || r.ci.length < 6) totalIssues++;
   });
 
-  const primaria = docentes.filter(r => r.ciclo === 'PRIMARIA').length;
-  const secundaria = docentes.filter(r => (r.ciclo || '').includes('MEDIA')).length;
-  const inicial = docentes.filter(r => r.ciclo === 'INICIAL').length;
-  const other = docentes.length - primaria - secundaria - inicial;
+  // Removed count
+  const totalDocInRecords = allRecords.filter((r, i) => r.relacion === 'DOCENTE').length;
+  const removedCount = totalDocInRecords - docentes.length;
+  document.getElementById('depure-removed-info').innerHTML = removedCount > 0
+    ? `<strong>${removedCount}</strong> eliminado${removedCount > 1 ? 's' : ''}`
+    : '';
 
   // Summary cards
   document.getElementById('staff-summary').innerHTML = `
@@ -3689,14 +3903,22 @@ function renderStaffDetail() {
     <div class="staff-summary-card issues"><div class="num">${totalIssues}</div><div class="lbl">Datos faltantes</div></div>
   `;
 
-  // Tabs
-  const tabKeys = ['all', ...Object.keys(groups).sort(), 'issues'];
+  // Build unique group keys from all docentes (for tabs)
+  const cicloGroups = {};
+  docentes.forEach(r => {
+    const key = r.ciclo || 'SIN CLASIFICAR';
+    if (!cicloGroups[key]) cicloGroups[key] = [];
+    cicloGroups[key].push(r);
+  });
+
+  // Tabs (always by ciclo for filtering)
+  const tabKeys = ['all', ...Object.keys(cicloGroups).sort(), 'issues'];
   const tabLabels = { all: 'Todos', issues: 'Con problemas' };
   document.getElementById('staff-tabs').innerHTML = tabKeys.map(k =>
     `<div class="staff-tab ${staffDetailFilter === k ? 'active' : ''}" onclick="staffDetailFilter='${k}';renderStaffDetail();">${tabLabels[k] || k}</div>`
   ).join('');
 
-  // Filter
+  // Filter by tab
   let filtered = docentes;
   if (staffDetailFilter === 'issues') {
     filtered = docentes.filter(r =>
@@ -3713,14 +3935,24 @@ function renderStaffDetail() {
       (r.primerNombre || '').toLowerCase().includes(search) ||
       (r.primerApellido || '').toLowerCase().includes(search) ||
       (r.ci || '').includes(search) ||
-      (r.cargo || '').toLowerCase().includes(search)
+      (r.cargo || '').toLowerCase().includes(search) ||
+      (r.grado || '').toLowerCase().includes(search)
     );
   }
 
-  // Group filtered results
+  // Group filtered results by selected groupBy mode
   const filteredGroups = {};
   filtered.forEach(r => {
-    const key = r.ciclo || 'SIN CLASIFICAR';
+    let key;
+    if (staffGroupBy === 'grado') {
+      const ciclo = r.ciclo || 'SIN CLASIFICAR';
+      const grado = r.grado || 'Sin grupo';
+      key = `${ciclo} - ${grado}`;
+    } else if (staffGroupBy === 'cargo') {
+      key = r.cargo || 'Sin cargo';
+    } else {
+      key = r.ciclo || 'SIN CLASIFICAR';
+    }
     if (!filteredGroups[key]) filteredGroups[key] = [];
     filteredGroups[key].push(r);
   });
@@ -3734,15 +3966,42 @@ function renderStaffDetail() {
 
   const sectionOrder = ['PRIMARIA', 'EDUCACION MEDIA BASICA', 'INICIAL', 'SIN CLASIFICAR'];
   const sectionIcons = { 'PRIMARIA': '🏫', 'EDUCACION MEDIA BASICA': '🎓', 'INICIAL': '🌱', 'SIN CLASIFICAR': '❓' };
+
   const sortedKeys = Object.keys(filteredGroups).sort((a, b) => {
-    const ia = sectionOrder.indexOf(a), ib = sectionOrder.indexOf(b);
-    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+    if (staffGroupBy === 'ciclo') {
+      const ia = sectionOrder.indexOf(a), ib = sectionOrder.indexOf(b);
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+    }
+    if (staffGroupBy === 'grado') {
+      // Sort by ciclo first, then grado
+      const cicloA = a.split(' - ')[0], cicloB = b.split(' - ')[0];
+      const ia = sectionOrder.indexOf(cicloA), ib = sectionOrder.indexOf(cicloB);
+      if (ia !== ib) return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+      return a.localeCompare(b);
+    }
+    return a.localeCompare(b);
   });
 
   let html = '';
   for (const key of sortedKeys) {
     const recs = filteredGroups[key];
-    html += `<div class="staff-section-title">${sectionIcons[key] || '📋'} ${key} <span class="cnt">(${recs.length})</span></div>`;
+    const sectionIndices = recs.map(r => r._idx);
+
+    // Section icon
+    let icon = '📋';
+    if (staffGroupBy === 'ciclo') {
+      icon = sectionIcons[key] || '📋';
+    } else if (staffGroupBy === 'grado') {
+      const ciclo = key.split(' - ')[0];
+      icon = sectionIcons[ciclo] || '📋';
+    }
+
+    html += `<div class="staff-section-header">
+      <div class="staff-section-title">${icon} ${escapeHtml(key)} <span class="cnt">(${recs.length})</span></div>
+      <button class="btn-remove-section" onclick="confirmRemoveSection(this.dataset.key, [${sectionIndices.join(',')}])" data-key="${escapeHtml(key)}">
+        Eliminar grupo (${recs.length})
+      </button>
+    </div>`;
     html += `<div class="staff-grid">`;
     for (const r of recs) {
       const badApellido = isBadValue(r.primerApellido);
@@ -3758,7 +4017,8 @@ function renderStaffDetail() {
       if (badFecha) tags.push('<span class="staff-tag warn">Fecha inválida</span>');
       if (!hasIssues) tags.push('<span class="staff-tag" style="color:var(--green);">Completo</span>');
 
-      html += `<div class="staff-card ${hasIssues ? 'has-issues' : ''}">
+      html += `<div class="staff-card ${hasIssues ? 'has-issues' : ''}" data-idx="${r._idx}">
+        <button class="btn-remove-card" onclick="removeStaffRecord(${r._idx})" title="Eliminar docente">✕</button>
         <div class="staff-card-header">
           <span class="staff-card-name">${escapeHtml(r.primerNombre || '?')} ${escapeHtml(r.primerApellido || '?')}</span>
           <span class="staff-card-cargo">${escapeHtml(r.cargo || 'Sin cargo')}</span>
