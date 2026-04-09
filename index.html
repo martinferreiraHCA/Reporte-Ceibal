@@ -1436,8 +1436,9 @@ document.getElementById('file-staff-csv').addEventListener('change', async (e) =
     infoEl.classList.remove('hidden');
 
     if (report.matched > 0) {
-      let msg = `<span style="color:var(--green);">✓ ${file.name} — ${report.matched} funcionarios actualizados</span>`;
-      msg += `<span style="color:var(--text-dim);font-size:0.78rem;"> (${report.updatedDates} fechas, ${report.updatedCargos} cargos, ${report.updatedCiclos} ciclos)</span>`;
+      let msg = `<span style="color:var(--green);">✓ ${file.name} — ${report.matched} funcionarios activos actualizados</span>`;
+      msg += `<span style="color:var(--text-dim);font-size:0.78rem;"> (${report.updatedNames} nombres, ${report.updatedDates} fechas, ${report.updatedCargos} cargos, ${report.updatedCiclos} ciclos` +
+        (report.skippedInactive > 0 ? `, ${report.skippedInactive} inactivos omitidos` : '') + `)</span>`;
       if (report.details.length > 0) {
         msg += `<details style="margin-top:0.3rem;font-size:0.78rem;"><summary style="cursor:pointer;color:var(--text-dim);">Ver detalle de cambios</summary>`;
         msg += `<ul style="margin:0.3rem 0 0 1rem;padding:0;list-style:disc;">`;
@@ -3078,11 +3079,12 @@ function cicloFromCargo(cargo) {
   return '';
 }
 
-// Import full staff data from CSV: updates cargo, ciclo, and dates for all matched staff
+// Import full staff data from CSV: updates cargo, ciclo, dates, and names for all matched staff
 function importStaffDataFromCSV(csvText) {
   const csvEntries = parseStaffCSV(csvText);
   const report = {
     parsed: csvEntries.length, matched: 0, updatedDates: 0, updatedCargos: 0, updatedCiclos: 0,
+    updatedNames: 0, skippedInactive: 0,
     details: [], unmatched: [], status: 'ok'
   };
 
@@ -3091,6 +3093,12 @@ function importStaffDataFromCSV(csvText) {
     .filter(({ r }) => r.relacion === 'DOCENTE');
 
   for (const entry of csvEntries) {
+    // Solo cotejar docentes activos
+    if (entry.activo !== 'SI') {
+      report.skippedInactive++;
+      continue;
+    }
+
     if (!entry.ci && !entry.apellido) continue;
 
     let found = false;
@@ -3112,6 +3120,28 @@ function importStaffDataFromCSV(csvText) {
 
       if (ciMatch || nameMatch) {
         const changes = [];
+
+        // Update primer apellido (solo el primer apellido del campo)
+        if (entry.apellido) {
+          const newApellido = entry.apellido.split(/\s+/)[0].toUpperCase();
+          if (newApellido && newApellido !== r.primerApellido) {
+            const oldApellido = r.primerApellido || '(vacio)';
+            r.primerApellido = newApellido;
+            changes.push(`apellido: ${oldApellido} -> ${newApellido}`);
+            report.updatedNames++;
+          }
+        }
+
+        // Update primer nombre (solo el primer nombre del campo)
+        if (entry.nombre) {
+          const newNombre = entry.nombre.split(/\s+/)[0].toUpperCase();
+          if (newNombre && newNombre !== r.primerNombre) {
+            const oldNombre = r.primerNombre || '(vacio)';
+            r.primerNombre = newNombre;
+            changes.push(`nombre: ${oldNombre} -> ${newNombre}`);
+            report.updatedNames++;
+          }
+        }
 
         // Update date
         if (entry.date && entry.date !== r.fechaNac) {
