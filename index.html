@@ -622,6 +622,18 @@
         <div class="sublabel">ExpDatosPersonal.xlsx</div>
       </div>
       <div class="file-info hidden" id="info-staff"></div>
+      <div style="margin-top:0.6rem;padding-top:0.6rem;border-top:1px solid var(--border);">
+        <div style="font-size:0.82rem;color:var(--text-dim);margin-bottom:0.4rem;">
+          <strong>CSV de Datos Funcionarios</strong> (opcional) — Para cotejar cargos, fechas y clasificar por sistema.
+        </div>
+        <div class="upload-zone" id="dropzone-staff-csv" style="padding:0.8rem;">
+          <input type="file" accept=".csv,.txt" id="file-staff-csv">
+          <div class="icon-big" style="font-size:1.2rem;">📋</div>
+          <div class="label" style="font-size:0.8rem;">Cargar CSV de funcionarios</div>
+          <div class="sublabel" style="font-size:0.72rem;">Datos_Funcionarios.csv</div>
+        </div>
+        <div class="file-info hidden" id="info-staff-csv"></div>
+      </div>
     </div>
 
     <div class="card" style="border-color:var(--accent);border-style:dashed;">
@@ -1410,6 +1422,49 @@ document.getElementById('file-staff').addEventListener('change', async (e) => {
     updateNextBtn();
   } catch(err) {
     alert('Error al leer el archivo: ' + err.message);
+  }
+});
+
+// ===== Load staff CSV (Datos Funcionarios) =====
+document.getElementById('file-staff-csv').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const report = importStaffDataFromCSV(text);
+    const infoEl = document.getElementById('info-staff-csv');
+    infoEl.classList.remove('hidden');
+
+    if (report.matched > 0) {
+      let msg = `<span style="color:var(--green);">✓ ${file.name} — ${report.matched} funcionarios actualizados</span>`;
+      msg += `<span style="color:var(--text-dim);font-size:0.78rem;"> (${report.updatedDates} fechas, ${report.updatedCargos} cargos, ${report.updatedCiclos} ciclos)</span>`;
+      if (report.details.length > 0) {
+        msg += `<details style="margin-top:0.3rem;font-size:0.78rem;"><summary style="cursor:pointer;color:var(--text-dim);">Ver detalle de cambios</summary>`;
+        msg += `<ul style="margin:0.3rem 0 0 1rem;padding:0;list-style:disc;">`;
+        report.details.forEach(d => {
+          msg += `<li><strong>${d.name}</strong> (CI: ${d.ci}, ${d.method}): ${d.changes.join(', ')}</li>`;
+        });
+        msg += `</ul></details>`;
+      }
+      if (report.unmatched.length > 0) {
+        msg += `<details style="margin-top:0.3rem;font-size:0.78rem;"><summary style="cursor:pointer;color:var(--orange);">${report.unmatched.length} sin coincidencia en planilla de personal</summary>`;
+        msg += `<ul style="margin:0.3rem 0 0 1rem;padding:0;list-style:disc;">`;
+        report.unmatched.forEach(u => {
+          msg += `<li>${u.name} (CI: ${u.ci}) — ${u.cargo}</li>`;
+        });
+        msg += `</ul></details>`;
+      }
+      infoEl.innerHTML = msg;
+      // Re-render if we're already on step 3
+      if (typeof renderStep3 === 'function' && !document.getElementById('step3').classList.contains('hidden')) {
+        renderStep3();
+      }
+    } else {
+      infoEl.innerHTML = `<span style="color:var(--orange);">Sin coincidencias. CSV: ${report.parsed} filas. ` +
+        `Asegurate de haber cargado primero la planilla de personal (ExpDatosPersonal.xlsx).</span>`;
+    }
+  } catch(err) {
+    alert('Error al leer el CSV: ' + err.message);
   }
 });
 
@@ -2895,7 +2950,7 @@ function normStr(s) {
 function parseStaffCSV(csvText) {
   const normalizedInput = (csvText || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   const lines = normalizedInput.split('\n').map(l => l.trim()).filter(l => l);
-  let colCI = 5, colFecha = 6, colNombre = 2, colApellido = 1;
+  let colCI = 5, colFecha = 6, colNombre = 2, colApellido = 1, colCargo = 3, colActivo = 0;
 
   for (let li = 0; li < Math.min(lines.length, 10); li++) {
     const testCols = parseLine(lines[li]);
@@ -2905,6 +2960,8 @@ function parseStaffCSV(csvText) {
       if (/FECHA.*NAC|NAC.*FECHA|NACIMIENTO/.test(v)) colFecha = c;
       if (/^NOMBRE/.test(v)) colNombre = c;
       if (/^APELLIDO/.test(v)) colApellido = c;
+      if (/^CARGO/.test(v)) colCargo = c;
+      if (/^ACTIVO/.test(v)) colActivo = c;
     }
   }
 
@@ -2918,9 +2975,11 @@ function parseStaffCSV(csvText) {
     const dateRaw = (cols[colFecha] || '').trim();
     const nombre = (cols[colNombre] || '').trim();
     const apellido = (cols[colApellido] || '').trim();
+    const cargo = (cols[colCargo] || '').trim();
+    const activo = (cols[colActivo] || '').trim().toUpperCase();
     const date = parseSpanishDate(dateRaw) || cleanDate(dateRaw);
 
-    entries.push({ ci, date, nombre, apellido, dateRaw, line: li + 1 });
+    entries.push({ ci, date, nombre, apellido, cargo, activo, dateRaw, line: li + 1 });
   }
   return entries;
 }
@@ -3000,6 +3059,111 @@ function importStaffDatesFromCSV(csvText) {
   }
 
   if (report.parseErrors.length > 0) report.status = 'warn';
+  if (report.matched === 0 && report.parsed > 0) report.status = 'error';
+  return report;
+}
+
+// Determine ciclo from cargo string
+function cicloFromCargo(cargo) {
+  const cl = (cargo || '').toLowerCase();
+  const cicloPrimaria = ['primaria', 'maestra referente', 'maestra especializada', 'maestr'];
+  const cicloInicial = ['inicial', 'jardin'];
+  const cicloMedia = ['liceo', 'profesor', 'secundaria', 'media', 'adscript'];
+
+  if (cicloInicial.some(k => cl.includes(k))) return 'INICIAL';
+  if (cicloPrimaria.some(k => cl.includes(k))) return 'PRIMARIA';
+  if (cicloMedia.some(k => cl.includes(k))) return 'EDUCACION MEDIA BASICA';
+  if (cl.includes('director colegio')) return 'PRIMARIA';
+  if (cl.includes('director liceo') || cl.includes('directora de secundaria')) return 'EDUCACION MEDIA BASICA';
+  return '';
+}
+
+// Import full staff data from CSV: updates cargo, ciclo, and dates for all matched staff
+function importStaffDataFromCSV(csvText) {
+  const csvEntries = parseStaffCSV(csvText);
+  const report = {
+    parsed: csvEntries.length, matched: 0, updatedDates: 0, updatedCargos: 0, updatedCiclos: 0,
+    details: [], unmatched: [], status: 'ok'
+  };
+
+  const allStaff = allRecords
+    .map((r, i) => ({ r, i }))
+    .filter(({ r }) => r.relacion === 'DOCENTE');
+
+  for (const entry of csvEntries) {
+    if (!entry.ci && !entry.apellido) continue;
+
+    let found = false;
+
+    for (const { r, i } of allStaff) {
+      // Match by CI (exact or flexible)
+      const rci = (r.ci || ''), eci = (entry.ci || '');
+      const ciMatch = eci && rci && (
+        rci === eci ||
+        (rci.length === 7 && eci.length === 8 && eci.startsWith(rci)) ||
+        (rci.length === 8 && eci.length === 7 && rci.startsWith(eci)) ||
+        (rci.length >= 6 && eci.length >= 6 && rci.slice(0, 6) === eci.slice(0, 6))
+      );
+
+      // Match by name if CI fails
+      const nameMatch = !ciMatch && entry.apellido &&
+        normStr(r.primerApellido) === normStr(entry.apellido.split(/\s+/)[0]) &&
+        normStr(r.primerNombre) === normStr((entry.nombre || '').split(/\s+/)[0]);
+
+      if (ciMatch || nameMatch) {
+        const changes = [];
+
+        // Update date
+        if (entry.date && entry.date !== r.fechaNac) {
+          const oldDate = r.fechaNac || '(vacio)';
+          r.fechaNac = entry.date;
+          changes.push(`fecha: ${oldDate} -> ${entry.date}`);
+          report.updatedDates++;
+        }
+
+        // Update cargo
+        if (entry.cargo && entry.cargo !== r.cargo) {
+          const oldCargo = r.cargo || '(vacio)';
+          r.cargo = entry.cargo;
+          changes.push(`cargo: ${oldCargo} -> ${entry.cargo}`);
+          report.updatedCargos++;
+        }
+
+        // Update ciclo based on new cargo
+        if (entry.cargo) {
+          const newCiclo = cicloFromCargo(entry.cargo);
+          if (newCiclo && newCiclo !== r.ciclo) {
+            const oldCiclo = r.ciclo || '(vacio)';
+            r.ciclo = newCiclo;
+            changes.push(`ciclo: ${oldCiclo} -> ${newCiclo}`);
+            report.updatedCiclos++;
+          }
+        }
+
+        if (changes.length > 0) {
+          report.matched++;
+          report.details.push({
+            name: `${r.primerNombre} ${r.primerApellido}`,
+            ci: r.ci,
+            method: ciMatch ? 'CI' : 'Nombre',
+            changes
+          });
+        }
+        found = true;
+        break;
+      }
+    }
+
+    if (!found && (entry.ci || entry.apellido)) {
+      report.unmatched.push({
+        line: entry.line,
+        ci: entry.ci || '(sin CI)',
+        name: `${entry.nombre || ''} ${entry.apellido || ''}`.trim(),
+        cargo: entry.cargo || ''
+      });
+    }
+  }
+
   if (report.matched === 0 && report.parsed > 0) report.status = 'error';
   return report;
 }
