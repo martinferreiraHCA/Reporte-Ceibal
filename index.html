@@ -3125,16 +3125,29 @@ function extractPrimerApellido(fullApellido) {
   return words.slice(0, i + 1).join(' ');
 }
 
-// Import full staff data from CSV: the CSV is the source of truth
-// - Staff found in CSV as active + reportable → update data
+// Check if a SIGED value looks like bad/garbage data
+function isBadValue(val) {
+  if (!val || !val.trim()) return true;
+  const v = val.trim().toUpperCase();
+  if (v === 'SI' || v === 'NO') return true;
+  if (v === 'SIN NOMBRE' || v === 'SIN APELLIDO') return true;
+  if (v === 'PERSONAL') return true;
+  if (/^\d+$/.test(v)) return true; // pure number where text expected
+  if (v.length < 2) return true;
+  return false;
+}
+
+// Import full staff data from CSV
+// Priority: SIGED data is primary. CSV only fills in bad/missing values.
 // - Staff found in CSV as inactive or non-reportable → remove
+// - Staff found in CSV as active + reportable → fill gaps from CSV
 // - Staff not found in CSV → keep as-is
 function importStaffDataFromCSV(csvText) {
   const csvEntries = parseStaffCSV(csvText);
   const report = {
     parsed: csvEntries.length, matched: 0, removed: 0,
     updatedDates: 0, updatedCargos: 0, updatedCiclos: 0, updatedNames: 0,
-    details: [], removedDetails: [], unmatched: [], status: 'ok'
+    details: [], removedDetails: [], status: 'ok'
   };
 
   // Helper: flexible CI comparison
@@ -3147,22 +3160,24 @@ function importStaffDataFromCSV(csvText) {
     return false;
   }
 
-  // Build CSV lookup: find CSV entry for a given staff record
+  // Find CSV entry for a given staff record
   function findCSVEntry(r) {
-    // Try CI match first
+    // Try CI match first (most reliable)
     if (r.ci) {
       for (const entry of csvEntries) {
         if (entry.ci && ciFlexMatch(r.ci, entry.ci)) return entry;
       }
     }
-    // Try name match
-    for (const entry of csvEntries) {
-      if (!entry.apellido) continue;
-      const eAp = normStr(extractPrimerApellido(entry.apellido));
-      const rAp = normStr(r.primerApellido);
-      const eNom = normStr((entry.nombre || '').split(/\s+/)[0]);
-      const rNom = normStr(r.primerNombre);
-      if (eAp && rAp && eAp === rAp && eNom && rNom && eNom === rNom) return entry;
+    // Try name match only if SIGED names look valid
+    if (!isBadValue(r.primerApellido) && !isBadValue(r.primerNombre)) {
+      for (const entry of csvEntries) {
+        if (!entry.apellido) continue;
+        const eAp = normStr(extractPrimerApellido(entry.apellido));
+        const rAp = normStr(r.primerApellido);
+        const eNom = normStr((entry.nombre || '').split(/\s+/)[0]);
+        const rNom = normStr(r.primerNombre);
+        if (eAp && rAp && eAp === rAp && eNom && rNom && eNom === rNom) return entry;
+      }
     }
     return null;
   }
@@ -3177,7 +3192,7 @@ function importStaffDataFromCSV(csvText) {
     const csvEntry = findCSVEntry(r);
     if (!csvEntry) continue; // Not in CSV → keep as-is
 
-    const isActive = csvEntry.activo.toUpperCase() === 'SI';
+    const isActive = (csvEntry.activo || '').toUpperCase() === 'SI';
     const isReportable = isReportableCargo(csvEntry.cargo);
 
     // If inactive or non-reportable → remove
@@ -3194,14 +3209,13 @@ function importStaffDataFromCSV(csvText) {
       continue;
     }
 
-    // Active + reportable → update data
+    // Active + reportable → fill gaps (SIGED is primary, CSV fills bad data)
     const changes = [];
-    const entryPrimerApellido = extractPrimerApellido(csvEntry.apellido);
 
-    // Update primer apellido
-    if (entryPrimerApellido) {
-      const newApellido = entryPrimerApellido.toUpperCase();
-      if (newApellido && newApellido !== r.primerApellido) {
+    // Apellido: keep SIGED if valid, use CSV if SIGED is bad
+    if (isBadValue(r.primerApellido) && csvEntry.apellido) {
+      const newApellido = extractPrimerApellido(csvEntry.apellido).toUpperCase();
+      if (newApellido) {
         const oldApellido = r.primerApellido || '(vacio)';
         r.primerApellido = newApellido;
         changes.push(`apellido: ${oldApellido} -> ${newApellido}`);
@@ -3209,10 +3223,10 @@ function importStaffDataFromCSV(csvText) {
       }
     }
 
-    // Update primer nombre
-    if (csvEntry.nombre) {
+    // Nombre: keep SIGED if valid, use CSV if SIGED is bad
+    if (isBadValue(r.primerNombre) && csvEntry.nombre) {
       const newNombre = csvEntry.nombre.split(/\s+/)[0].toUpperCase();
-      if (newNombre && newNombre !== r.primerNombre) {
+      if (newNombre) {
         const oldNombre = r.primerNombre || '(vacio)';
         r.primerNombre = newNombre;
         changes.push(`nombre: ${oldNombre} -> ${newNombre}`);
@@ -3220,15 +3234,16 @@ function importStaffDataFromCSV(csvText) {
       }
     }
 
-    // Update date
-    if (csvEntry.date && csvEntry.date !== r.fechaNac) {
+    // Fecha: keep SIGED if valid dd/mm/yyyy, use CSV if missing/bad
+    const validDateRegex = /^\d{2}\/\d{2}\/\d{4}$/;
+    if ((!r.fechaNac || !validDateRegex.test(r.fechaNac)) && csvEntry.date) {
       const oldDate = r.fechaNac || '(vacio)';
       r.fechaNac = csvEntry.date;
       changes.push(`fecha: ${oldDate} -> ${csvEntry.date}`);
       report.updatedDates++;
     }
 
-    // Update cargo
+    // Cargo: always take from CSV (SIGED usually doesn't have good cargo)
     if (csvEntry.cargo && csvEntry.cargo !== r.cargo) {
       const oldCargo = r.cargo || '(vacio)';
       r.cargo = csvEntry.cargo;
@@ -3236,7 +3251,7 @@ function importStaffDataFromCSV(csvText) {
       report.updatedCargos++;
     }
 
-    // Update ciclo based on cargo
+    // Ciclo: always derive from CSV cargo (more reliable classification)
     if (csvEntry.cargo) {
       const newCiclo = cicloFromCargo(csvEntry.cargo);
       if (newCiclo && newCiclo !== r.ciclo) {
