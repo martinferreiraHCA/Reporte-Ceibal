@@ -1250,7 +1250,7 @@ function parseStaffFile(wb) {
   const seenCIs = new Set();
 
   // Docente-eligible cargo keywords (for ciclo classification)
-  const cicloPrimaria = ['primaria', 'maestra referente', 'maestra especializada', 'maestr'];
+  const cicloPrimaria = ['primaria', 'maestra referente', 'maestra especializada', 'maestr', 'teacher', 'aux. docente', 'aux docente'];
   const cicloInicial = ['inicial', 'jardin'];
   const cicloMedia = ['liceo', 'profesor', 'secundaria', 'media'];
 
@@ -1430,7 +1430,8 @@ function parseStaffFile(wb) {
     } else if (cicloMedia.some(k => cargoLower.includes(k))) {
       ciclo = 'EDUCACION MEDIA BASICA';
     }
-    if (cargoLower.includes('director colegio')) ciclo = 'PRIMARIA';
+    if (cargoLower.includes('adscript')) ciclo = 'EDUCACION MEDIA BASICA';
+    if (cargoLower.includes('director colegio') || cargoLower.includes('directora general')) ciclo = 'PRIMARIA';
     if (cargoLower.includes('director liceo')) ciclo = 'EDUCACION MEDIA BASICA';
 
     // Default ciclo based on student file type
@@ -3175,19 +3176,31 @@ function importStaffDatesFromCSV(csvText) {
 // Determine ciclo from cargo string
 function cicloFromCargo(cargo) {
   const cl = (cargo || '').toLowerCase();
-  const cicloPrimaria = ['primaria', 'maestra referente', 'maestra especializada', 'maestr'];
-  const cicloInicial = ['inicial', 'jardin'];
-  const cicloMedia = ['liceo', 'profesor', 'secundaria', 'media', 'adscript'];
 
-  if (cicloInicial.some(k => cl.includes(k))) return 'INICIAL';
-  if (cicloPrimaria.some(k => cl.includes(k))) return 'PRIMARIA';
-  if (cicloMedia.some(k => cl.includes(k))) return 'EDUCACION MEDIA BASICA';
-  if (cl.includes('director colegio')) return 'PRIMARIA';
+  // Secundaria (must check first to avoid false matches)
+  if (cl.includes('secundaria')) return 'EDUCACION MEDIA BASICA';
+  if (cl.includes('adscript')) return 'EDUCACION MEDIA BASICA';
+  if (cl.includes('liceo')) return 'EDUCACION MEDIA BASICA';
   if (cl.includes('director liceo') || cl.includes('directora de secundaria')) return 'EDUCACION MEDIA BASICA';
+
+  // Inicial
+  if (cl.includes('inicial') || cl.includes('jardin')) return 'INICIAL';
+
+  // Primaria (teachers, maestras, aux. docente, etc.)
+  if (cl.includes('maestr')) return 'PRIMARIA';
+  if (cl.includes('teacher')) return 'PRIMARIA';
+  if (cl.includes('aux. docente') || cl.includes('aux docente')) return 'PRIMARIA';
+  if (cl.includes('primaria')) return 'PRIMARIA';
+  if (cl.includes('maestra referente') || cl.includes('maestra especializada')) return 'PRIMARIA';
+  if (cl.includes('director colegio') || cl.includes('directora general')) return 'PRIMARIA';
+
   return '';
 }
 
 // Check if a cargo is reportable (docente, director, or adscripto)
+// NOT reportable: auxiliar de servicio, recepcionista, secretaria, administrativa,
+// RRHH, chef, portería, mantenimiento, psicóloga, psicopedagoga, bibliotecóloga,
+// comunicación, auxiliar cafetería/cocina, Prof. Patín, PERSONAL
 function isReportableCargo(cargo) {
   const cl = (cargo || '').toLowerCase();
   if (!cl) return false;
@@ -3195,12 +3208,13 @@ function isReportableCargo(cargo) {
   if (/maestr/.test(cl)) return true;
   if (/docente/.test(cl)) return true;
   if (/teacher/.test(cl)) return true;
-  if (/profes/.test(cl)) return true;
-  if (/prof\./.test(cl)) return true;
+  if (/aux\.\s*docente|aux\s+docente/.test(cl)) return true;
   if (/ed\.\s*f[ií]sica/.test(cl)) return true;
-  if (/coordinador/.test(cl)) return true;
+  if (/coordinador.*f[ií]sica/.test(cl)) return true;
+  if (/coordinador.*ingl[eé]s/.test(cl)) return true;
   if (/referente/.test(cl)) return true;
   if (/m[uú]sica/.test(cl)) return true;
+  if (/portugu[eé]s/.test(cl)) return true;
   // Directores
   if (/director/.test(cl)) return true;
   // Adscriptos
