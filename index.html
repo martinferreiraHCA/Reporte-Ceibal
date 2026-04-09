@@ -3079,6 +3079,43 @@ function cicloFromCargo(cargo) {
   return '';
 }
 
+// Check if a cargo is reportable (docente, director, or adscripto)
+function isReportableCargo(cargo) {
+  const cl = (cargo || '').toLowerCase();
+  if (!cl) return false;
+  // Docentes
+  if (/maestr/.test(cl)) return true;
+  if (/docente/.test(cl)) return true;
+  if (/teacher/.test(cl)) return true;
+  if (/profes/.test(cl)) return true;
+  if (/prof\./.test(cl)) return true;
+  if (/ed\.\s*f[ií]sica/.test(cl)) return true;
+  if (/coordinador/.test(cl)) return true;
+  if (/referente/.test(cl)) return true;
+  if (/m[uú]sica/.test(cl)) return true;
+  // Directores
+  if (/director/.test(cl)) return true;
+  // Adscriptos
+  if (/adscript/.test(cl)) return true;
+  return false;
+}
+
+// Extract primer apellido respecting compound surnames (De Los Santos, De la Cruz, etc.)
+function extractPrimerApellido(fullApellido) {
+  if (!fullApellido) return '';
+  const words = fullApellido.trim().split(/\s+/);
+  if (words.length <= 1) return fullApellido.trim();
+
+  const particles = new Set(['de', 'del', 'los', 'las', 'la', 'el', 'da', 'das', 'do', 'dos', 'di', 'van', 'von']);
+  let i = 0;
+  // Collect leading particles (de, los, la, etc.)
+  while (i < words.length - 1 && particles.has(words[i].toLowerCase())) {
+    i++;
+  }
+  // Include the first non-particle word as the actual surname
+  return words.slice(0, i + 1).join(' ');
+}
+
 // Import full staff data from CSV: updates cargo, ciclo, dates, and names for all matched staff
 function importStaffDataFromCSV(csvText) {
   const csvEntries = parseStaffCSV(csvText);
@@ -3099,9 +3136,16 @@ function importStaffDataFromCSV(csvText) {
       continue;
     }
 
+    // Solo cotejar cargos reportables (docentes, directores, adscriptos)
+    if (!isReportableCargo(entry.cargo)) {
+      report.skippedInactive++;
+      continue;
+    }
+
     if (!entry.ci && !entry.apellido) continue;
 
     let found = false;
+    const entryPrimerApellido = extractPrimerApellido(entry.apellido);
 
     for (const { r, i } of allStaff) {
       // Match by CI (exact or flexible)
@@ -3114,16 +3158,16 @@ function importStaffDataFromCSV(csvText) {
       );
 
       // Match by name if CI fails
-      const nameMatch = !ciMatch && entry.apellido &&
-        normStr(r.primerApellido) === normStr(entry.apellido.split(/\s+/)[0]) &&
+      const nameMatch = !ciMatch && entryPrimerApellido &&
+        normStr(r.primerApellido) === normStr(entryPrimerApellido) &&
         normStr(r.primerNombre) === normStr((entry.nombre || '').split(/\s+/)[0]);
 
       if (ciMatch || nameMatch) {
         const changes = [];
 
-        // Update primer apellido (solo el primer apellido del campo)
-        if (entry.apellido) {
-          const newApellido = entry.apellido.split(/\s+/)[0].toUpperCase();
+        // Update primer apellido (respetando apellidos compuestos)
+        if (entryPrimerApellido) {
+          const newApellido = entryPrimerApellido.toUpperCase();
           if (newApellido && newApellido !== r.primerApellido) {
             const oldApellido = r.primerApellido || '(vacio)';
             r.primerApellido = newApellido;
