@@ -1435,27 +1435,36 @@ document.getElementById('file-staff-csv').addEventListener('change', async (e) =
     const infoEl = document.getElementById('info-staff-csv');
     infoEl.classList.remove('hidden');
 
-    if (report.matched > 0) {
-      let msg = `<span style="color:var(--green);">✓ ${file.name} — ${report.matched} funcionarios activos actualizados</span>`;
-      msg += `<span style="color:var(--text-dim);font-size:0.78rem;"> (${report.updatedNames} nombres, ${report.updatedDates} fechas, ${report.updatedCargos} cargos, ${report.updatedCiclos} ciclos` +
-        (report.skippedInactive > 0 ? `, ${report.skippedInactive} inactivos omitidos` : '') + `)</span>`;
+    if (report.matched > 0 || report.removed > 0) {
+      let msg = `<span style="color:var(--green);">✓ ${file.name} — ${report.matched} actualizados`;
+      if (report.removed > 0) msg += `, <span style="color:var(--red);">${report.removed} eliminados</span>`;
+      msg += `</span>`;
+      msg += `<span style="color:var(--text-dim);font-size:0.78rem;"> (${report.updatedNames} nombres, ${report.updatedDates} fechas, ${report.updatedCargos} cargos, ${report.updatedCiclos} ciclos)</span>`;
       if (report.details.length > 0) {
-        msg += `<details style="margin-top:0.3rem;font-size:0.78rem;"><summary style="cursor:pointer;color:var(--text-dim);">Ver detalle de cambios</summary>`;
+        msg += `<details style="margin-top:0.3rem;font-size:0.78rem;"><summary style="cursor:pointer;color:var(--text-dim);">Ver detalle de actualizaciones (${report.details.length})</summary>`;
         msg += `<ul style="margin:0.3rem 0 0 1rem;padding:0;list-style:disc;">`;
         report.details.forEach(d => {
-          msg += `<li><strong>${d.name}</strong> (CI: ${d.ci}, ${d.method}): ${d.changes.join(', ')}</li>`;
+          msg += `<li><strong>${d.name}</strong> (CI: ${d.ci}): ${d.changes.join(', ')}</li>`;
         });
         msg += `</ul></details>`;
       }
-      if (report.unmatched.length > 0) {
-        msg += `<details style="margin-top:0.3rem;font-size:0.78rem;"><summary style="cursor:pointer;color:var(--orange);">${report.unmatched.length} sin coincidencia en planilla de personal</summary>`;
+      if (report.removedDetails.length > 0) {
+        msg += `<details style="margin-top:0.3rem;font-size:0.78rem;"><summary style="cursor:pointer;color:var(--red);">Ver eliminados (${report.removedDetails.length})</summary>`;
         msg += `<ul style="margin:0.3rem 0 0 1rem;padding:0;list-style:disc;">`;
-        report.unmatched.forEach(u => {
-          msg += `<li>${u.name} (CI: ${u.ci}) — ${u.cargo}</li>`;
+        report.removedDetails.forEach(d => {
+          msg += `<li><strong>${d.name}</strong> (CI: ${d.ci}) — ${d.reason}</li>`;
         });
         msg += `</ul></details>`;
       }
       infoEl.innerHTML = msg;
+      // Update staff count in info-staff
+      if (report.removed > 0) {
+        const currentStaffCount = allRecords.filter(r => r.relacion === 'DOCENTE').length;
+        const staffInfoEl = document.getElementById('info-staff');
+        if (staffInfoEl && !staffInfoEl.classList.contains('hidden')) {
+          staffInfoEl.innerHTML = `✓ ${currentStaffCount} docentes activos (${report.removed} eliminados por CSV)`;
+        }
+      }
       // Re-render if we're already on step 3
       if (typeof renderStep3 === 'function' && !document.getElementById('step3').classList.contains('hidden')) {
         renderStep3();
@@ -3116,129 +3125,156 @@ function extractPrimerApellido(fullApellido) {
   return words.slice(0, i + 1).join(' ');
 }
 
-// Import full staff data from CSV: updates cargo, ciclo, dates, and names for all matched staff
+// Import full staff data from CSV: the CSV is the source of truth
+// - Staff found in CSV as active + reportable → update data
+// - Staff found in CSV as inactive or non-reportable → remove
+// - Staff not found in CSV → keep as-is
 function importStaffDataFromCSV(csvText) {
   const csvEntries = parseStaffCSV(csvText);
   const report = {
-    parsed: csvEntries.length, matched: 0, updatedDates: 0, updatedCargos: 0, updatedCiclos: 0,
-    updatedNames: 0, skippedInactive: 0,
-    details: [], unmatched: [], status: 'ok'
+    parsed: csvEntries.length, matched: 0, removed: 0,
+    updatedDates: 0, updatedCargos: 0, updatedCiclos: 0, updatedNames: 0,
+    details: [], removedDetails: [], unmatched: [], status: 'ok'
   };
 
+  // Helper: flexible CI comparison
+  function ciFlexMatch(a, b) {
+    if (!a || !b) return false;
+    if (a === b) return true;
+    if (a.length === 7 && b.length === 8 && b.startsWith(a)) return true;
+    if (a.length === 8 && b.length === 7 && a.startsWith(b)) return true;
+    if (a.length >= 6 && b.length >= 6 && a.slice(0, 6) === b.slice(0, 6)) return true;
+    return false;
+  }
+
+  // Build CSV lookup: find CSV entry for a given staff record
+  function findCSVEntry(r) {
+    // Try CI match first
+    if (r.ci) {
+      for (const entry of csvEntries) {
+        if (entry.ci && ciFlexMatch(r.ci, entry.ci)) return entry;
+      }
+    }
+    // Try name match
+    for (const entry of csvEntries) {
+      if (!entry.apellido) continue;
+      const eAp = normStr(extractPrimerApellido(entry.apellido));
+      const rAp = normStr(r.primerApellido);
+      const eNom = normStr((entry.nombre || '').split(/\s+/)[0]);
+      const rNom = normStr(r.primerNombre);
+      if (eAp && rAp && eAp === rAp && eNom && rNom && eNom === rNom) return entry;
+    }
+    return null;
+  }
+
+  // Process each DOCENTE record against the CSV
+  const toRemove = new Set();
   const allStaff = allRecords
     .map((r, i) => ({ r, i }))
     .filter(({ r }) => r.relacion === 'DOCENTE');
 
-  for (const entry of csvEntries) {
-    // Solo cotejar docentes activos
-    if (entry.activo !== 'SI') {
-      report.skippedInactive++;
+  for (const { r, i } of allStaff) {
+    const csvEntry = findCSVEntry(r);
+    if (!csvEntry) continue; // Not in CSV → keep as-is
+
+    const isActive = csvEntry.activo.toUpperCase() === 'SI';
+    const isReportable = isReportableCargo(csvEntry.cargo);
+
+    // If inactive or non-reportable → remove
+    if (!isActive || !isReportable) {
+      toRemove.add(i);
+      const reason = !isActive ? 'Inactivo en CSV' : `Cargo no reportable: ${csvEntry.cargo}`;
+      report.removedDetails.push({
+        name: `${r.primerNombre} ${r.primerApellido}`,
+        ci: r.ci,
+        cargo: csvEntry.cargo,
+        reason
+      });
+      report.removed++;
       continue;
     }
 
-    // Solo cotejar cargos reportables (docentes, directores, adscriptos)
-    if (!isReportableCargo(entry.cargo)) {
-      report.skippedInactive++;
-      continue;
-    }
+    // Active + reportable → update data
+    const changes = [];
+    const entryPrimerApellido = extractPrimerApellido(csvEntry.apellido);
 
-    if (!entry.ci && !entry.apellido) continue;
-
-    let found = false;
-    const entryPrimerApellido = extractPrimerApellido(entry.apellido);
-
-    for (const { r, i } of allStaff) {
-      // Match by CI (exact or flexible)
-      const rci = (r.ci || ''), eci = (entry.ci || '');
-      const ciMatch = eci && rci && (
-        rci === eci ||
-        (rci.length === 7 && eci.length === 8 && eci.startsWith(rci)) ||
-        (rci.length === 8 && eci.length === 7 && rci.startsWith(eci)) ||
-        (rci.length >= 6 && eci.length >= 6 && rci.slice(0, 6) === eci.slice(0, 6))
-      );
-
-      // Match by name if CI fails
-      const nameMatch = !ciMatch && entryPrimerApellido &&
-        normStr(r.primerApellido) === normStr(entryPrimerApellido) &&
-        normStr(r.primerNombre) === normStr((entry.nombre || '').split(/\s+/)[0]);
-
-      if (ciMatch || nameMatch) {
-        const changes = [];
-
-        // Update primer apellido (respetando apellidos compuestos)
-        if (entryPrimerApellido) {
-          const newApellido = entryPrimerApellido.toUpperCase();
-          if (newApellido && newApellido !== r.primerApellido) {
-            const oldApellido = r.primerApellido || '(vacio)';
-            r.primerApellido = newApellido;
-            changes.push(`apellido: ${oldApellido} -> ${newApellido}`);
-            report.updatedNames++;
-          }
-        }
-
-        // Update primer nombre (solo el primer nombre del campo)
-        if (entry.nombre) {
-          const newNombre = entry.nombre.split(/\s+/)[0].toUpperCase();
-          if (newNombre && newNombre !== r.primerNombre) {
-            const oldNombre = r.primerNombre || '(vacio)';
-            r.primerNombre = newNombre;
-            changes.push(`nombre: ${oldNombre} -> ${newNombre}`);
-            report.updatedNames++;
-          }
-        }
-
-        // Update date
-        if (entry.date && entry.date !== r.fechaNac) {
-          const oldDate = r.fechaNac || '(vacio)';
-          r.fechaNac = entry.date;
-          changes.push(`fecha: ${oldDate} -> ${entry.date}`);
-          report.updatedDates++;
-        }
-
-        // Update cargo
-        if (entry.cargo && entry.cargo !== r.cargo) {
-          const oldCargo = r.cargo || '(vacio)';
-          r.cargo = entry.cargo;
-          changes.push(`cargo: ${oldCargo} -> ${entry.cargo}`);
-          report.updatedCargos++;
-        }
-
-        // Update ciclo based on new cargo
-        if (entry.cargo) {
-          const newCiclo = cicloFromCargo(entry.cargo);
-          if (newCiclo && newCiclo !== r.ciclo) {
-            const oldCiclo = r.ciclo || '(vacio)';
-            r.ciclo = newCiclo;
-            changes.push(`ciclo: ${oldCiclo} -> ${newCiclo}`);
-            report.updatedCiclos++;
-          }
-        }
-
-        if (changes.length > 0) {
-          report.matched++;
-          report.details.push({
-            name: `${r.primerNombre} ${r.primerApellido}`,
-            ci: r.ci,
-            method: ciMatch ? 'CI' : 'Nombre',
-            changes
-          });
-        }
-        found = true;
-        break;
+    // Update primer apellido
+    if (entryPrimerApellido) {
+      const newApellido = entryPrimerApellido.toUpperCase();
+      if (newApellido && newApellido !== r.primerApellido) {
+        const oldApellido = r.primerApellido || '(vacio)';
+        r.primerApellido = newApellido;
+        changes.push(`apellido: ${oldApellido} -> ${newApellido}`);
+        report.updatedNames++;
       }
     }
 
-    if (!found && (entry.ci || entry.apellido)) {
-      report.unmatched.push({
-        line: entry.line,
-        ci: entry.ci || '(sin CI)',
-        name: `${entry.nombre || ''} ${entry.apellido || ''}`.trim(),
-        cargo: entry.cargo || ''
+    // Update primer nombre
+    if (csvEntry.nombre) {
+      const newNombre = csvEntry.nombre.split(/\s+/)[0].toUpperCase();
+      if (newNombre && newNombre !== r.primerNombre) {
+        const oldNombre = r.primerNombre || '(vacio)';
+        r.primerNombre = newNombre;
+        changes.push(`nombre: ${oldNombre} -> ${newNombre}`);
+        report.updatedNames++;
+      }
+    }
+
+    // Update date
+    if (csvEntry.date && csvEntry.date !== r.fechaNac) {
+      const oldDate = r.fechaNac || '(vacio)';
+      r.fechaNac = csvEntry.date;
+      changes.push(`fecha: ${oldDate} -> ${csvEntry.date}`);
+      report.updatedDates++;
+    }
+
+    // Update cargo
+    if (csvEntry.cargo && csvEntry.cargo !== r.cargo) {
+      const oldCargo = r.cargo || '(vacio)';
+      r.cargo = csvEntry.cargo;
+      changes.push(`cargo: ${oldCargo} -> ${csvEntry.cargo}`);
+      report.updatedCargos++;
+    }
+
+    // Update ciclo based on cargo
+    if (csvEntry.cargo) {
+      const newCiclo = cicloFromCargo(csvEntry.cargo);
+      if (newCiclo && newCiclo !== r.ciclo) {
+        const oldCiclo = r.ciclo || '(vacio)';
+        r.ciclo = newCiclo;
+        changes.push(`ciclo: ${oldCiclo} -> ${newCiclo}`);
+        report.updatedCiclos++;
+      }
+    }
+
+    if (changes.length > 0) {
+      report.matched++;
+      report.details.push({
+        name: `${r.primerNombre} ${r.primerApellido}`,
+        ci: r.ci,
+        changes
       });
     }
   }
 
-  if (report.matched === 0 && report.parsed > 0) report.status = 'error';
+  // Remove non-reportable/inactive staff
+  if (toRemove.size > 0) {
+    // Also clean up disabledRecords indices
+    const oldRecords = allRecords;
+    allRecords = allRecords.filter((_, i) => !toRemove.has(i));
+    // Rebuild disabledRecords with new indices
+    const newDisabled = new Set();
+    let newIdx = 0;
+    for (let oldIdx = 0; oldIdx < oldRecords.length; oldIdx++) {
+      if (toRemove.has(oldIdx)) continue;
+      if (disabledRecords.has(oldIdx)) newDisabled.add(newIdx);
+      newIdx++;
+    }
+    disabledRecords.clear();
+    newDisabled.forEach(idx => disabledRecords.add(idx));
+  }
+
+  if (report.matched === 0 && report.removed === 0 && report.parsed > 0) report.status = 'error';
   return report;
 }
 
