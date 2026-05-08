@@ -851,6 +851,11 @@
           <div style="font-weight:700;font-size:1rem;margin-bottom:0.3rem;">Lista de cédulas por grupo</div>
           <div style="color:var(--text-dim);font-size:0.8rem;">Generar PDFs y Excel con las cédulas separadas por cada grupo/curso</div>
         </div>
+        <div class="mode-card" id="mode-olympics" onclick="selectMode('olympics')">
+          <div style="font-size:2rem;margin-bottom:0.5rem;">🏅</div>
+          <div style="font-weight:700;font-size:1rem;margin-bottom:0.3rem;">Lista de Olimpiadas</div>
+          <div style="color:var(--text-dim);font-size:0.8rem;">Selecciona varios grupos, depura datos y agrega participantes para exportar un PDF con nombre, fecha de nacimiento y CI</div>
+        </div>
       </div>
     </div>
     <div style="display:flex;gap:0.8rem;margin-top:1rem;">
@@ -881,6 +886,113 @@
 
     <div style="display:flex;gap:0.8rem;margin-top:1rem;">
       <button class="btn btn-outline" id="btn-back-lists">← Volver</button>
+    </div>
+  </div>
+
+  <!-- Step Olympics: Olympics list builder -->
+  <div id="step-olympics" class="hidden">
+    <div class="card">
+      <div class="card-title"><span class="icon">🏫</span> Datos del centro y olimpiada</div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Nombre del centro educativo</label>
+          <input type="text" id="school-name-olympics" placeholder="Ej: Colegio Hans Christian Andersen">
+        </div>
+        <div class="form-group">
+          <label>Nombre de la olimpiada (opcional)</label>
+          <input type="text" id="olympics-name" placeholder="Ej: Olimpíada de Matemática 2026">
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="icon">👥</span> Seleccionar grupos</div>
+      <p style="color:var(--text-dim);font-size:0.82rem;margin-bottom:0.6rem;">
+        Marcá los grupos cuyos estudiantes querés incluir en la lista. Podés agregar también participantes manualmente o cargar una lista existente.
+      </p>
+      <div style="display:flex;gap:0.5rem;margin-bottom:0.7rem;flex-wrap:wrap;">
+        <button class="btn btn-outline btn-sm" onclick="olympicsSelectAllGroups(true)">Seleccionar todos</button>
+        <button class="btn btn-outline btn-sm" onclick="olympicsSelectAllGroups(false)">Limpiar selección</button>
+      </div>
+      <div id="olympics-group-checks" style="display:flex;flex-wrap:wrap;gap:0.4rem;"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title"><span class="icon">🛠</span> Acciones</div>
+      <div style="display:flex;gap:0.6rem;flex-wrap:wrap;">
+        <button class="btn btn-outline" onclick="openOlympicsAddModal()">➕ Agregar persona manualmente</button>
+        <button class="btn btn-outline" id="btn-olympics-upload-trigger" onclick="document.getElementById('file-olympics-import').click()">📂 Cargar lista existente (XLSX)</button>
+        <input type="file" accept=".xlsx,.xls" id="file-olympics-import" style="display:none">
+        <button class="btn btn-outline" onclick="olympicsFlagAnomalousDates()">🔍 Detectar fechas atípicas</button>
+        <button class="btn btn-outline" onclick="olympicsClearManual()">🗑 Vaciar manuales</button>
+      </div>
+      <div id="olympics-anomaly-summary" style="margin-top:0.7rem;font-size:0.82rem;color:var(--text-dim);"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">
+        <span class="icon">📜</span> Lista de participantes
+        <span class="count-badge" id="olympics-count" style="margin-left:auto;">0</span>
+      </div>
+      <div id="olympics-list-table"></div>
+    </div>
+
+    <div style="display:flex;gap:0.6rem;flex-wrap:wrap;">
+      <button class="btn btn-success" onclick="olympicsExportPDF()">📄 Exportar PDF</button>
+      <button class="btn btn-primary" onclick="olympicsExportXLSX()">📊 Exportar XLSX (para volver a editar)</button>
+      <button class="btn btn-outline" id="btn-back-olympics">← Volver</button>
+    </div>
+  </div>
+
+  <!-- Olympics Add/Edit Modal -->
+  <div class="modal-overlay" id="olympics-add-modal">
+    <div class="modal modal-wide">
+      <button class="close-btn" onclick="closeOlympicsAddModal()">✕</button>
+      <h3 id="olympics-modal-title">Agregar participante</h3>
+      <p style="color:var(--text-dim);font-size:0.8rem;margin-bottom:0.8rem;">
+        Datos requeridos por Ceibal para inscripción. Cédula y fecha de nacimiento son obligatorias.
+      </p>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Primer nombre *</label>
+          <input type="text" id="oadd-primerNombre" placeholder="Ej: María">
+        </div>
+        <div class="form-group">
+          <label>Segundo nombre</label>
+          <input type="text" id="oadd-segundoNombre" placeholder="Ej: Sofía">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Primer apellido *</label>
+          <input type="text" id="oadd-primerApellido" placeholder="Ej: Pérez">
+        </div>
+        <div class="form-group">
+          <label>Segundo apellido</label>
+          <input type="text" id="oadd-segundoApellido" placeholder="Ej: González">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Cédula (sin puntos ni guiones) *</label>
+          <input type="text" id="oadd-ci" placeholder="Ej: 12345678" inputmode="numeric">
+        </div>
+        <div class="form-group">
+          <label>Fecha de nacimiento (dd/mm/yyyy) *</label>
+          <input type="text" id="oadd-fechaNac" placeholder="Ej: 15/03/2012">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Grupo / curso (opcional)</label>
+          <input type="text" id="oadd-grupo" placeholder="Ej: 5°2 (CT)">
+        </div>
+      </div>
+      <div id="oadd-error" style="color:var(--red);font-size:0.82rem;margin-bottom:0.5rem;"></div>
+      <div style="display:flex;gap:0.5rem;">
+        <button class="btn btn-success" onclick="saveOlympicsManual()">Guardar</button>
+        <button class="btn btn-outline" onclick="closeOlympicsAddModal()">Cancelar</button>
+      </div>
     </div>
   </div>
 
@@ -1930,9 +2042,9 @@ function updateNextBtn() {
 });
 
 // ===== Navigation =====
-let appMode = null; // 'report' or 'lists'
+let appMode = null; // 'report' | 'lists' | 'olympics'
 
-const ALL_STEPS = ['step1', 'step-mode', 'step-lists', 'step2', 'step3'];
+const ALL_STEPS = ['step1', 'step-mode', 'step-lists', 'step-olympics', 'step2', 'step3'];
 const ALL_INDS = ['step1-ind', 'step-mode-ind', 'step2-ind', 'step3-ind'];
 
 function showStepById(stepId) {
@@ -1943,8 +2055,11 @@ function showStepById(stepId) {
   // Determine progress for indicators
   const reportFlow = ['step1', 'step-mode', 'step2', 'step3'];
   const listsFlow = ['step1', 'step-mode', 'step-lists'];
+  const olympicsFlow = ['step1', 'step-mode', 'step-olympics'];
 
-  const flow = appMode === 'lists' ? listsFlow : reportFlow;
+  const flow = appMode === 'lists' ? listsFlow
+              : appMode === 'olympics' ? olympicsFlow
+              : reportFlow;
   const currentIdx = flow.indexOf(stepId);
 
   ALL_INDS.forEach(indId => {
@@ -1957,6 +2072,7 @@ function showStepById(stepId) {
     'step1': 'step1-ind',
     'step-mode': 'step-mode-ind',
     'step-lists': 'step2-ind',
+    'step-olympics': 'step2-ind',
     'step2': 'step2-ind',
     'step3': 'step3-ind'
   };
@@ -1969,8 +2085,8 @@ function showStepById(stepId) {
     if (i === currentIdx) el.classList.add('active');
   });
 
-  // Hide step3/step4 indicators in lists mode
-  if (appMode === 'lists') {
+  // Hide step3 indicator in lists/olympics mode
+  if (appMode === 'lists' || appMode === 'olympics') {
     document.getElementById('step3-ind').style.display = 'none';
   } else {
     document.getElementById('step3-ind').style.display = '';
@@ -1981,12 +2097,16 @@ function selectMode(mode) {
   appMode = mode;
   document.getElementById('mode-report').classList.toggle('selected', mode === 'report');
   document.getElementById('mode-lists').classList.toggle('selected', mode === 'lists');
+  document.getElementById('mode-olympics').classList.toggle('selected', mode === 'olympics');
 
   if (mode === 'report') {
     showStepById('step2');
-  } else {
+  } else if (mode === 'lists') {
     renderGroupListsStep();
     showStepById('step-lists');
+  } else if (mode === 'olympics') {
+    renderOlympicsStep();
+    showStepById('step-olympics');
   }
 }
 
@@ -2017,6 +2137,12 @@ document.getElementById('btn-back-mode').addEventListener('click', () => {
 
 // Lists → back to Mode
 document.getElementById('btn-back-lists').addEventListener('click', () => {
+  appMode = null;
+  showStepById('step-mode');
+});
+
+// Olympics → back to Mode
+document.getElementById('btn-back-olympics').addEventListener('click', () => {
   appMode = null;
   showStepById('step-mode');
 });
@@ -2736,6 +2862,564 @@ document.getElementById('btn-excel-groups').addEventListener('click', () => {
     }, idx * 500);
   });
 });
+
+// ===== Olympics list =====
+// Selected group keys (subset of getStudentGroupsAll() labels)
+let olympicsSelectedGroups = new Set();
+// Manually added participants (not in allRecords)
+let olympicsManual = []; // [{ primerNombre, segundoNombre, primerApellido, segundoApellido, ci, fechaNac, grupo }]
+// CIs flagged as anomalous-by-age (computed on demand)
+let olympicsAnomalousCIs = new Set();
+// CIs hidden from auto-included groups (when user removed them)
+let olympicsHiddenCIs = new Set();
+// Editing index in modal: null = adding new, number = editing manual entry index
+let olympicsEditingIdx = null;
+
+function renderOlympicsStep() {
+  const groups = getStudentGroupsAll();
+  const groupKeys = Object.keys(groups);
+  const cont = document.getElementById('olympics-group-checks');
+  if (groupKeys.length === 0) {
+    cont.innerHTML = '<span style="color:var(--text-dim);font-size:0.82rem;">No hay grupos detectados. Podés agregar participantes manualmente o cargar una lista existente.</span>';
+  } else {
+    cont.innerHTML = groupKeys.map(g => {
+      const checked = olympicsSelectedGroups.has(g);
+      const safeId = 'ogrp-' + g.replace(/[^a-zA-Z0-9]/g, '_');
+      return `<label class="filter-check ${checked ? '' : 'unchecked'}" for="${safeId}">
+        <input type="checkbox" id="${safeId}" ${checked ? 'checked' : ''} onchange="toggleOlympicsGroup('${g.replace(/'/g, "\\'")}', this.checked)">
+        ${g} <span style="color:var(--text-dim);font-weight:400;">(${groups[g].length})</span>
+      </label>`;
+    }).join('');
+  }
+  renderOlympicsList();
+}
+
+function toggleOlympicsGroup(grupo, checked) {
+  if (checked) olympicsSelectedGroups.add(grupo);
+  else olympicsSelectedGroups.delete(grupo);
+  renderOlympicsList();
+}
+
+function olympicsSelectAllGroups(all) {
+  const groups = getStudentGroupsAll();
+  olympicsSelectedGroups = new Set(all ? Object.keys(groups) : []);
+  renderOlympicsStep();
+}
+
+// Build the consolidated participant list from selected groups + manual entries.
+function getOlympicsParticipants() {
+  const groups = getStudentGroupsAll();
+  const out = [];
+  olympicsSelectedGroups.forEach(g => {
+    const list = groups[g] || [];
+    list.forEach(s => {
+      if (olympicsHiddenCIs.has(s.ci)) return;
+      out.push({
+        source: 'group',
+        grupo: g,
+        ci: s.ci,
+        fechaNac: s.fechaNac || '',
+        primerNombre: s.primerNombre || '',
+        segundoNombre: '',
+        primerApellido: s.primerApellido || '',
+        segundoApellido: '',
+        grado: s.grado || '',
+        ciclo: s.ciclo || ''
+      });
+    });
+  });
+  olympicsManual.forEach((m, idx) => {
+    out.push({
+      source: 'manual',
+      manualIdx: idx,
+      grupo: m.grupo || '',
+      ci: m.ci,
+      fechaNac: m.fechaNac || '',
+      primerNombre: m.primerNombre || '',
+      segundoNombre: m.segundoNombre || '',
+      primerApellido: m.primerApellido || '',
+      segundoApellido: m.segundoApellido || '',
+      grado: m.grado || '',
+      ciclo: m.ciclo || ''
+    });
+  });
+  // Sort: by grupo, then primer apellido, then primer nombre
+  out.sort((a, b) => {
+    const g = (a.grupo || 'zzz').localeCompare(b.grupo || 'zzz', 'es', { numeric: true });
+    if (g !== 0) return g;
+    const ap = (a.primerApellido || '').localeCompare(b.primerApellido || '', 'es');
+    if (ap !== 0) return ap;
+    return (a.primerNombre || '').localeCompare(b.primerNombre || '', 'es');
+  });
+  return out;
+}
+
+function fullName(p) {
+  return [p.primerNombre, p.segundoNombre, p.primerApellido, p.segundoApellido]
+    .filter(Boolean).join(' ').trim();
+}
+
+function renderOlympicsList() {
+  const participants = getOlympicsParticipants();
+  document.getElementById('olympics-count').textContent = `${participants.length} ${participants.length === 1 ? 'participante' : 'participantes'}`;
+  const tbl = document.getElementById('olympics-list-table');
+  if (participants.length === 0) {
+    tbl.innerHTML = '<div style="color:var(--text-dim);font-size:0.85rem;padding:0.5rem 0;">Aún no hay participantes. Seleccioná grupos arriba o agregá personas manualmente.</div>';
+    return;
+  }
+  const rows = participants.map(p => {
+    const name = fullName(p);
+    const anomaly = olympicsAnomalousCIs.has(p.ci);
+    const rowStyle = anomaly ? 'background:var(--orange-dim);' : '';
+    const editBtn = p.source === 'manual'
+      ? `<button class="btn btn-sm btn-outline" onclick="openOlympicsEditModal(${p.manualIdx})">✎</button>`
+      : '';
+    const removeBtn = p.source === 'manual'
+      ? `<button class="btn btn-sm btn-outline" onclick="removeOlympicsManual(${p.manualIdx})" title="Eliminar manual">✕</button>`
+      : `<button class="btn btn-sm btn-outline" onclick="hideOlympicsCI('${p.ci}')" title="Quitar de la lista">✕</button>`;
+    const sourceTag = p.source === 'manual'
+      ? '<span class="count-badge" style="background:var(--accent-glow);color:var(--accent);font-size:0.65rem;">manual</span>'
+      : `<span class="count-badge" style="font-size:0.65rem;">${p.grupo || ''}</span>`;
+    const flag = anomaly ? '<span title="Fecha de nacimiento atípica para el grado" style="color:var(--orange);">⚠</span>' : '';
+    return `<tr style="${rowStyle}">
+      <td style="padding:0.4rem 0.5rem;">${sourceTag}</td>
+      <td style="padding:0.4rem 0.5rem;">${name || '<span style="color:var(--red)">(sin nombre)</span>'}</td>
+      <td style="padding:0.4rem 0.5rem;font-variant-numeric:tabular-nums;">${p.fechaNac || '<span style="color:var(--red)">—</span>'} ${flag}</td>
+      <td style="padding:0.4rem 0.5rem;font-variant-numeric:tabular-nums;">${p.ci || '<span style="color:var(--red)">—</span>'}</td>
+      <td style="padding:0.4rem 0.5rem;text-align:right;">${editBtn} ${removeBtn}</td>
+    </tr>`;
+  }).join('');
+  tbl.innerHTML = `<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:0.85rem;">
+    <thead>
+      <tr style="border-bottom:1px solid var(--border);text-align:left;color:var(--text-dim);font-size:0.72rem;text-transform:uppercase;">
+        <th style="padding:0.4rem 0.5rem;">Origen</th>
+        <th style="padding:0.4rem 0.5rem;">Nombre completo</th>
+        <th style="padding:0.4rem 0.5rem;">Fecha nac.</th>
+        <th style="padding:0.4rem 0.5rem;">CI</th>
+        <th style="padding:0.4rem 0.5rem;text-align:right;">Acciones</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+}
+
+function hideOlympicsCI(ci) {
+  olympicsHiddenCIs.add(ci);
+  renderOlympicsList();
+}
+
+function removeOlympicsManual(idx) {
+  olympicsManual.splice(idx, 1);
+  renderOlympicsList();
+}
+
+function olympicsClearManual() {
+  if (olympicsManual.length === 0) {
+    alert('No hay participantes manuales para eliminar.');
+    return;
+  }
+  if (confirm(`¿Eliminar los ${olympicsManual.length} participantes agregados manualmente? Esta acción no se puede deshacer.`)) {
+    olympicsManual = [];
+    olympicsHiddenCIs = new Set();
+    renderOlympicsList();
+  }
+}
+
+// ===== Olympics: add/edit modal =====
+function openOlympicsAddModal() {
+  olympicsEditingIdx = null;
+  document.getElementById('olympics-modal-title').textContent = 'Agregar participante';
+  ['oadd-primerNombre', 'oadd-segundoNombre', 'oadd-primerApellido', 'oadd-segundoApellido', 'oadd-ci', 'oadd-fechaNac', 'oadd-grupo']
+    .forEach(id => { document.getElementById(id).value = ''; });
+  document.getElementById('oadd-error').textContent = '';
+  document.getElementById('olympics-add-modal').classList.add('show');
+}
+
+function openOlympicsEditModal(idx) {
+  const m = olympicsManual[idx];
+  if (!m) return;
+  olympicsEditingIdx = idx;
+  document.getElementById('olympics-modal-title').textContent = 'Editar participante';
+  document.getElementById('oadd-primerNombre').value = m.primerNombre || '';
+  document.getElementById('oadd-segundoNombre').value = m.segundoNombre || '';
+  document.getElementById('oadd-primerApellido').value = m.primerApellido || '';
+  document.getElementById('oadd-segundoApellido').value = m.segundoApellido || '';
+  document.getElementById('oadd-ci').value = m.ci || '';
+  document.getElementById('oadd-fechaNac').value = m.fechaNac || '';
+  document.getElementById('oadd-grupo').value = m.grupo || '';
+  document.getElementById('oadd-error').textContent = '';
+  document.getElementById('olympics-add-modal').classList.add('show');
+}
+
+function closeOlympicsAddModal() {
+  document.getElementById('olympics-add-modal').classList.remove('show');
+  olympicsEditingIdx = null;
+}
+
+function validateOlympicsDate(s) {
+  // Expects dd/mm/yyyy
+  const m = String(s || '').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!m) return null;
+  const dd = parseInt(m[1]), mm = parseInt(m[2]), yyyy = parseInt(m[3]);
+  if (mm < 1 || mm > 12 || dd < 1 || dd > 31) return null;
+  if (yyyy < 1900 || yyyy > 2100) return null;
+  const dt = new Date(yyyy, mm - 1, dd);
+  if (dt.getFullYear() !== yyyy || dt.getMonth() !== mm - 1 || dt.getDate() !== dd) return null;
+  return `${String(dd).padStart(2, '0')}/${String(mm).padStart(2, '0')}/${yyyy}`;
+}
+
+function saveOlympicsManual() {
+  const errEl = document.getElementById('oadd-error');
+  const primerNombre = document.getElementById('oadd-primerNombre').value.trim();
+  const segundoNombre = document.getElementById('oadd-segundoNombre').value.trim();
+  const primerApellido = document.getElementById('oadd-primerApellido').value.trim();
+  const segundoApellido = document.getElementById('oadd-segundoApellido').value.trim();
+  const ci = document.getElementById('oadd-ci').value.replace(/\D/g, '');
+  const fechaRaw = document.getElementById('oadd-fechaNac').value.trim();
+  const grupo = document.getElementById('oadd-grupo').value.trim();
+
+  if (!primerNombre || !primerApellido) {
+    errEl.textContent = 'Primer nombre y primer apellido son obligatorios.';
+    return;
+  }
+  if (!ci || ci.length < 6) {
+    errEl.textContent = 'Cédula inválida (mínimo 6 dígitos).';
+    return;
+  }
+  const fecha = validateOlympicsDate(fechaRaw);
+  if (!fecha) {
+    errEl.textContent = 'Fecha de nacimiento inválida. Usá formato dd/mm/yyyy.';
+    return;
+  }
+
+  // Check for duplicates by CI (excluding the current edit)
+  const existingIdx = olympicsManual.findIndex(m => m.ci === ci);
+  if (existingIdx !== -1 && existingIdx !== olympicsEditingIdx) {
+    errEl.textContent = `Ya existe un participante manual con la cédula ${ci}.`;
+    return;
+  }
+
+  const entry = {
+    primerNombre: primerNombre.toUpperCase(),
+    segundoNombre: segundoNombre.toUpperCase(),
+    primerApellido: primerApellido.toUpperCase(),
+    segundoApellido: segundoApellido.toUpperCase(),
+    ci,
+    fechaNac: fecha,
+    grupo
+  };
+
+  if (olympicsEditingIdx !== null) {
+    olympicsManual[olympicsEditingIdx] = entry;
+  } else {
+    olympicsManual.push(entry);
+  }
+  closeOlympicsAddModal();
+  renderOlympicsList();
+}
+
+// Close modal on overlay click
+document.getElementById('olympics-add-modal').addEventListener('click', (e) => {
+  if (e.target === document.getElementById('olympics-add-modal')) closeOlympicsAddModal();
+});
+
+// ===== Olympics: import existing XLSX =====
+document.getElementById('file-olympics-import').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  try {
+    const data = await readFile(file);
+    const wb = XLSX.read(data, { type: 'array', cellDates: true });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    if (!ws) throw new Error('La planilla no tiene hojas.');
+    const rows = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false });
+
+    // Expected headers from our exporter: "Primer nombre", "Segundo nombre", "Primer apellido", "Segundo apellido", "Cédula", "Fecha de nacimiento", "Grupo"
+    // Be tolerant: also accept "Nombre completo" + "CI" + "Fecha"
+    const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+    const findKey = (row, candidates) => {
+      const keys = Object.keys(row);
+      for (const c of candidates) {
+        const hit = keys.find(k => norm(k) === norm(c));
+        if (hit) return hit;
+      }
+      // fallback: includes
+      for (const c of candidates) {
+        const hit = keys.find(k => norm(k).includes(norm(c)));
+        if (hit) return hit;
+      }
+      return null;
+    };
+
+    let imported = 0, skipped = 0;
+    for (const row of rows) {
+      const kPN = findKey(row, ['primer nombre']);
+      const kSN = findKey(row, ['segundo nombre']);
+      const kPA = findKey(row, ['primer apellido']);
+      const kSA = findKey(row, ['segundo apellido']);
+      const kFull = findKey(row, ['nombre completo', 'nombre y apellido', 'nombre']);
+      const kCI = findKey(row, ['cedula', 'cédula', 'ci', 'documento']);
+      const kFecha = findKey(row, ['fecha de nacimiento', 'fecha nacimiento', 'fecha nac', 'fecha']);
+      const kGrupo = findKey(row, ['grupo', 'curso']);
+
+      let primerNombre = kPN ? String(row[kPN] || '').trim() : '';
+      let segundoNombre = kSN ? String(row[kSN] || '').trim() : '';
+      let primerApellido = kPA ? String(row[kPA] || '').trim() : '';
+      let segundoApellido = kSA ? String(row[kSA] || '').trim() : '';
+
+      if (!primerNombre && !primerApellido && kFull) {
+        const full = String(row[kFull] || '').trim().split(/\s+/);
+        if (full.length >= 2) {
+          primerNombre = full[0];
+          primerApellido = full[full.length - 1];
+          if (full.length >= 3) segundoNombre = full[1];
+        }
+      }
+
+      const ci = kCI ? String(row[kCI] || '').replace(/\D/g, '') : '';
+      let fechaRaw = kFecha ? String(row[kFecha] || '').trim() : '';
+      // If Excel date object came through
+      if (kFecha && row[kFecha] instanceof Date) {
+        const d = row[kFecha];
+        fechaRaw = `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+      }
+      const fecha = cleanDate(fechaRaw);
+      const grupo = kGrupo ? String(row[kGrupo] || '').trim() : '';
+
+      if (!ci || ci.length < 6 || !primerNombre || !primerApellido) {
+        skipped++;
+        continue;
+      }
+
+      // Skip if already in manual list
+      if (olympicsManual.some(m => m.ci === ci)) {
+        skipped++;
+        continue;
+      }
+
+      olympicsManual.push({
+        primerNombre: primerNombre.toUpperCase(),
+        segundoNombre: segundoNombre.toUpperCase(),
+        primerApellido: primerApellido.toUpperCase(),
+        segundoApellido: segundoApellido.toUpperCase(),
+        ci,
+        fechaNac: fecha || '',
+        grupo
+      });
+      imported++;
+    }
+
+    alert(`Importación terminada.\nAgregados: ${imported}\nOmitidos: ${skipped} (duplicados o datos incompletos)`);
+    renderOlympicsList();
+  } catch (err) {
+    console.error(err);
+    alert('No se pudo leer la planilla. Verificá que tenga columnas Nombre, CI y Fecha de nacimiento.');
+  } finally {
+    e.target.value = '';
+  }
+});
+
+// ===== Olympics: anomalous birth dates =====
+// Expected approximate age (in years) at the START of the school year for each ciclo+grado.
+// Uruguay primaria: 1° = 6 años cumplidos al ingreso.
+// EMB: 1° = 12. EMS (4to ciclo / bachillerato): 1° = 15.
+function expectedAgeFor(record) {
+  const grado = parseInt(record.grado);
+  if (!grado || isNaN(grado)) return null;
+  const ciclo = (record.ciclo || '').toUpperCase();
+  if (ciclo.includes('PRIMARIA')) return grado + 5;
+  if (ciclo.includes('INICIAL')) return grado + 2; // Inicial 3 → 3, Inicial 4 → 4, etc.
+  if (ciclo.includes('MEDIA BASICA') || ciclo.includes('MEDIA BÁSICA') || ciclo === 'EMB') return grado + 11;
+  if (ciclo.includes('CICLO') || ciclo.includes('BACHILLERATO') || ciclo === 'EMS') return grado + 14;
+  return null;
+}
+
+function ageFromBirth(fechaNac, refDate) {
+  const m = String(fechaNac || '').match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!m) return null;
+  const dd = parseInt(m[1]), mm = parseInt(m[2]), yyyy = parseInt(m[3]);
+  const ref = refDate || new Date();
+  let age = ref.getFullYear() - yyyy;
+  const beforeBday = (ref.getMonth() + 1 < mm) || (ref.getMonth() + 1 === mm && ref.getDate() < dd);
+  if (beforeBday) age--;
+  return age;
+}
+
+function olympicsFlagAnomalousDates() {
+  olympicsAnomalousCIs = new Set();
+  const today = new Date();
+  let flagged = 0;
+  let missing = 0;
+  const details = [];
+
+  // Walk over the merged participant list so we cover both group + manual entries.
+  const participants = getOlympicsParticipants();
+  participants.forEach(p => {
+    // For manual entries, we may not have ciclo/grado; try to infer from grupo string.
+    let ciclo = p.ciclo;
+    let grado = p.grado;
+    if ((!ciclo || !grado) && p.grupo) {
+      const parsed = parseCurso(p.grupo);
+      ciclo = parsed.ciclo || ciclo;
+      grado = parsed.grado || grado;
+    }
+    if (!p.fechaNac) { missing++; return; }
+
+    const expected = expectedAgeFor({ ciclo, grado });
+    if (expected === null) return;
+
+    const age = ageFromBirth(p.fechaNac, today);
+    if (age === null) { missing++; return; }
+    // Compare against the expected age at the start of the current school year (March).
+    // We use the current year's school start to make the heuristic stable.
+    const schoolStart = new Date(today.getFullYear(), 2, 1); // March 1
+    const ageAtStart = ageFromBirth(p.fechaNac, schoolStart);
+    const diff = ageAtStart - expected;
+    if (Math.abs(diff) > 1) {
+      olympicsAnomalousCIs.add(p.ci);
+      flagged++;
+      details.push(`• ${fullName(p)} (CI ${p.ci}, grupo ${p.grupo || '—'}): ${ageAtStart} años, esperado ~${expected}`);
+    }
+  });
+
+  const summary = document.getElementById('olympics-anomaly-summary');
+  if (flagged === 0 && missing === 0) {
+    summary.innerHTML = '<span style="color:var(--green);">✓ Todas las fechas de nacimiento son consistentes con el grado.</span>';
+  } else {
+    const parts = [];
+    if (flagged > 0) parts.push(`<span style="color:var(--orange);">⚠ ${flagged} con fecha atípica</span>`);
+    if (missing > 0) parts.push(`<span style="color:var(--red);">${missing} sin fecha válida</span>`);
+    summary.innerHTML = parts.join(' · ') + (details.length ? `<details style="margin-top:0.4rem;"><summary style="cursor:pointer;font-size:0.78rem;">Ver detalle</summary><pre style="white-space:pre-wrap;font-family:inherit;font-size:0.78rem;color:var(--text-dim);margin-top:0.3rem;">${details.join('\n')}</pre></details>` : '');
+  }
+  renderOlympicsList();
+}
+
+// ===== Olympics: export PDF =====
+function olympicsExportPDF() {
+  const participants = getOlympicsParticipants();
+  if (participants.length === 0) {
+    alert('No hay participantes para exportar. Seleccioná grupos o agregá personas manualmente.');
+    return;
+  }
+  const nombre = document.getElementById('school-name-olympics').value.trim();
+  if (!nombre) {
+    alert('Ingresá el nombre del centro educativo antes de generar el PDF.');
+    return;
+  }
+  const olimpiada = document.getElementById('olympics-name').value.trim();
+
+  if (!window.jspdf) { alert('Error: no se pudo cargar la librería jsPDF. Recargá la página.'); return; }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+
+  const pageW = 210;
+  const marginL = 15;
+  const marginR = 15;
+  const usableW = pageW - marginL - marginR;
+  const pageHeight = 287;
+
+  // Header
+  doc.setFontSize(15);
+  doc.setFont('helvetica', 'bold');
+  doc.text(olimpiada || 'Lista de participantes - Olimpíadas', pageW / 2, 18, { align: 'center' });
+  doc.setFontSize(11);
+  doc.setFont('helvetica', 'normal');
+  doc.text(nombre, pageW / 2, 25, { align: 'center' });
+  doc.setFontSize(9);
+  doc.setTextColor(100, 100, 100);
+  doc.text(`Total: ${participants.length} participante${participants.length === 1 ? '' : 's'}`, pageW / 2, 30, { align: 'center' });
+  doc.setTextColor(0, 0, 0);
+  doc.setDrawColor(150, 150, 150);
+  doc.line(marginL, 33, pageW - marginR, 33);
+
+  // Column layout: # | Nombre completo | Fecha nac. | CI | Grupo
+  const colX = {
+    n: marginL,
+    nombre: marginL + 10,
+    fecha: marginL + 95,
+    ci: marginL + 125,
+    grupo: marginL + 155
+  };
+  let y = 40;
+
+  const drawHeader = () => {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.text('#', colX.n, y);
+    doc.text('Nombre completo', colX.nombre, y);
+    doc.text('Fecha nac.', colX.fecha, y);
+    doc.text('Cédula', colX.ci, y);
+    doc.text('Grupo', colX.grupo, y);
+    y += 2;
+    doc.setDrawColor(180, 180, 180);
+    doc.line(marginL, y, pageW - marginR, y);
+    y += 4;
+    doc.setFont('helvetica', 'normal');
+  };
+  drawHeader();
+
+  doc.setFontSize(9.5);
+  participants.forEach((p, i) => {
+    if (y > pageHeight - 10) {
+      doc.addPage();
+      y = 20;
+      drawHeader();
+    }
+    let name = fullName(p);
+    // Truncate long name to fit
+    const maxNameW = colX.fecha - colX.nombre - 2;
+    while (doc.getTextWidth(name) > maxNameW && name.length > 4) {
+      name = name.slice(0, -1);
+    }
+    doc.text(String(i + 1), colX.n, y);
+    doc.text(name, colX.nombre, y);
+    doc.text(p.fechaNac || '—', colX.fecha, y);
+    doc.text(p.ci || '—', colX.ci, y);
+    doc.text((p.grupo || '').substring(0, 14), colX.grupo, y);
+    y += 6;
+  });
+
+  // Footer with date on each page
+  const pageCount = doc.internal.getNumberOfPages();
+  const today = new Date();
+  const stamp = `Generado el ${String(today.getDate()).padStart(2, '0')}/${String(today.getMonth() + 1).padStart(2, '0')}/${today.getFullYear()}`;
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i);
+    doc.setFontSize(8);
+    doc.setTextColor(140, 140, 140);
+    doc.text(stamp, marginL, 293);
+    doc.text(`Página ${i} de ${pageCount}`, pageW - marginR, 293, { align: 'right' });
+  }
+
+  const filename = (olimpiada || 'olimpiadas').replace(/[^a-zA-Z0-9]+/g, '_').toLowerCase() + '.pdf';
+  doc.save(filename);
+}
+
+// ===== Olympics: export XLSX (re-importable) =====
+function olympicsExportXLSX() {
+  const participants = getOlympicsParticipants();
+  if (participants.length === 0) {
+    alert('No hay participantes para exportar.');
+    return;
+  }
+  const headers = ['Primer nombre', 'Segundo nombre', 'Primer apellido', 'Segundo apellido', 'Cédula', 'Fecha de nacimiento', 'Grupo'];
+  const rows = [headers].concat(participants.map(p => [
+    p.primerNombre || '',
+    p.segundoNombre || '',
+    p.primerApellido || '',
+    p.segundoApellido || '',
+    p.ci || '',
+    p.fechaNac || '',
+    p.grupo || ''
+  ]));
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = [{ wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 18 }, { wch: 12 }, { wch: 14 }, { wch: 14 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Olimpiadas');
+  const olimpiada = document.getElementById('olympics-name').value.trim();
+  const filename = 'olimpiadas_' + (olimpiada || 'lista').replace(/[^a-zA-Z0-9]+/g, '_').toLowerCase() + '.xlsx';
+  XLSX.writeFile(wb, filename);
+}
 
 // ===== Bulk Discount Assignment =====
 let bulkParsedEntries = [];
