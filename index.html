@@ -889,8 +889,14 @@
     </div>
   </div>
 
-  <!-- Step Olympics: Olympics list builder -->
-  <div id="step-olympics" class="hidden">
+  <!-- Olympics Overlay: opened from step 2 (Elegir acción) -->
+  <div class="staff-overlay" id="step-olympics">
+   <div class="staff-topbar">
+     <h2>🏅 Lista de Olimpiadas</h2>
+     <span style="color:var(--text-dim);font-size:0.8rem;">Seleccioná grupos, agregá participantes y exportá un PDF con nombre, fecha de nacimiento y cédula.</span>
+     <button class="btn btn-outline" id="btn-back-olympics" style="margin-left:auto;">Cerrar</button>
+   </div>
+   <div style="max-width:1200px;width:100%;margin:0 auto;padding:1.5rem 2rem 3rem;">
     <div class="card">
       <div class="card-title"><span class="icon">🏫</span> Datos del centro y olimpiada</div>
       <div class="form-row">
@@ -940,8 +946,8 @@
     <div style="display:flex;gap:0.6rem;flex-wrap:wrap;">
       <button class="btn btn-success" onclick="olympicsExportPDF()">📄 Exportar PDF</button>
       <button class="btn btn-primary" onclick="olympicsExportXLSX()">📊 Exportar XLSX (para volver a editar)</button>
-      <button class="btn btn-outline" id="btn-back-olympics">← Volver</button>
     </div>
+   </div>
   </div>
 
   <!-- Olympics Add/Edit Modal -->
@@ -2042,9 +2048,9 @@ function updateNextBtn() {
 });
 
 // ===== Navigation =====
-let appMode = null; // 'report' | 'lists' | 'olympics'
+let appMode = null; // 'report' or 'lists' (olympics opens as overlay over step-mode)
 
-const ALL_STEPS = ['step1', 'step-mode', 'step-lists', 'step-olympics', 'step2', 'step3'];
+const ALL_STEPS = ['step1', 'step-mode', 'step-lists', 'step2', 'step3'];
 const ALL_INDS = ['step1-ind', 'step-mode-ind', 'step2-ind', 'step3-ind'];
 
 function showStepById(stepId) {
@@ -2055,11 +2061,8 @@ function showStepById(stepId) {
   // Determine progress for indicators
   const reportFlow = ['step1', 'step-mode', 'step2', 'step3'];
   const listsFlow = ['step1', 'step-mode', 'step-lists'];
-  const olympicsFlow = ['step1', 'step-mode', 'step-olympics'];
 
-  const flow = appMode === 'lists' ? listsFlow
-              : appMode === 'olympics' ? olympicsFlow
-              : reportFlow;
+  const flow = appMode === 'lists' ? listsFlow : reportFlow;
   const currentIdx = flow.indexOf(stepId);
 
   ALL_INDS.forEach(indId => {
@@ -2072,7 +2075,6 @@ function showStepById(stepId) {
     'step1': 'step1-ind',
     'step-mode': 'step-mode-ind',
     'step-lists': 'step2-ind',
-    'step-olympics': 'step2-ind',
     'step2': 'step2-ind',
     'step3': 'step3-ind'
   };
@@ -2085,8 +2087,8 @@ function showStepById(stepId) {
     if (i === currentIdx) el.classList.add('active');
   });
 
-  // Hide step3 indicator in lists/olympics mode
-  if (appMode === 'lists' || appMode === 'olympics') {
+  // Hide step3/step4 indicators in lists mode
+  if (appMode === 'lists') {
     document.getElementById('step3-ind').style.display = 'none';
   } else {
     document.getElementById('step3-ind').style.display = '';
@@ -2094,20 +2096,35 @@ function showStepById(stepId) {
 }
 
 function selectMode(mode) {
-  appMode = mode;
   document.getElementById('mode-report').classList.toggle('selected', mode === 'report');
   document.getElementById('mode-lists').classList.toggle('selected', mode === 'lists');
   document.getElementById('mode-olympics').classList.toggle('selected', mode === 'olympics');
 
+  if (mode === 'olympics') {
+    // Stay on step 2 (Elegir acción); open Olympics as a full overlay popup
+    openOlympicsOverlay();
+    return;
+  }
+
+  appMode = mode;
   if (mode === 'report') {
     showStepById('step2');
   } else if (mode === 'lists') {
     renderGroupListsStep();
     showStepById('step-lists');
-  } else if (mode === 'olympics') {
-    renderOlympicsStep();
-    showStepById('step-olympics');
   }
+}
+
+function openOlympicsOverlay() {
+  renderOlympicsStep();
+  document.getElementById('step-olympics').classList.add('show');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeOlympicsOverlay() {
+  document.getElementById('step-olympics').classList.remove('show');
+  document.body.style.overflow = '';
+  document.getElementById('mode-olympics').classList.remove('selected');
 }
 
 function renderGroupListsStep() {
@@ -2141,11 +2158,8 @@ document.getElementById('btn-back-lists').addEventListener('click', () => {
   showStepById('step-mode');
 });
 
-// Olympics → back to Mode
-document.getElementById('btn-back-olympics').addEventListener('click', () => {
-  appMode = null;
-  showStepById('step-mode');
-});
+// Olympics overlay → close
+document.getElementById('btn-back-olympics').addEventListener('click', closeOlympicsOverlay);
 
 // Step 2 (report) → back to Mode
 document.getElementById('btn-back2').addEventListener('click', () => {
